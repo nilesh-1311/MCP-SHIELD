@@ -35,16 +35,8 @@ class SSEHub {
     });
 
     if (this.listeners.size === 1 && typeof window !== 'undefined') {
-      // Connect after window has finished initial paint and document is complete
       if (this.connectDelayTimer) clearTimeout(this.connectDelayTimer);
-      const scheduleConnect = () => {
-        this.connectDelayTimer = setTimeout(() => this.connect(), 1200);
-      };
-      if (document.readyState === 'complete') {
-        scheduleConnect();
-      } else {
-        window.addEventListener('load', scheduleConnect, { once: true });
-      }
+      this.connectDelayTimer = setTimeout(() => this.connect(), 400);
     }
 
     return () => {
