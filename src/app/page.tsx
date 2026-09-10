@@ -15,6 +15,7 @@ import { AnalyticsView } from '@/components/AnalyticsView';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ToastProvider, useToast } from '@/components/ToastContext';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useShieldEvents } from '@/lib/hooks/useShieldEvents';
 import {
   MCPToolDefinition,
   SecurityEvent,
@@ -50,7 +51,7 @@ function MainAppContent() {
         const data = await res.json();
         setMetrics(data.metrics);
         setTools(data.tools || []);
-        setEvents(data.recentEvents || []);
+        setEvents(data.events || data.recentEvents || []);
         setThreats(data.activeThreats || []);
         setPolicies(data.policies || []);
         setPendingApprovals(data.pendingApprovals || []);
@@ -59,6 +60,15 @@ function MainAppContent() {
       console.error('Failed to fetch dashboard telemetry:', err);
     }
   }, []);
+
+  // Subscribe to live Server-Sent Events stream
+  const { latestEvent } = useShieldEvents();
+
+  useEffect(() => {
+    if (latestEvent) {
+      fetchDashboardData();
+    }
+  }, [latestEvent, fetchDashboardData]);
 
   const handleResetBaseline = async () => {
     setIsResetting(true);

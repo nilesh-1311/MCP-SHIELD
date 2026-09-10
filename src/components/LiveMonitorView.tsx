@@ -26,8 +26,74 @@ interface LiveMonitorProps {
   tools: MCPToolDefinition[];
 }
 
-export const LiveMonitorView: React.FC<LiveMonitorProps> = ({ tools }) => {
+const FALLBACK_DEFAULT_TOOLS: MCPToolDefinition[] = [
+  {
+    id: 'tool_file_reader',
+    name: 'file_reader',
+    version: '1.0.0',
+    description: 'Reads files from approved project directory.',
+    inputSchema: { type: 'object', properties: {} },
+    permissions: ['filesystem:read_approved'],
+    riskClassification: 'SAFE',
+    capability: 'read-only',
+    status: 'TRUSTED',
+    trustLevel: 'VERIFIED_OFFICIAL',
+    trustedFingerprint: '',
+    createdAt: '',
+    updatedAt: '',
+  },
+  {
+    id: 'tool_search_tool',
+    name: 'search_tool',
+    version: '1.0.0',
+    description: 'Searches local vector indexed knowledge base.',
+    inputSchema: { type: 'object', properties: {} },
+    permissions: ['knowledge_base:read'],
+    riskClassification: 'SAFE',
+    capability: 'read-only',
+    status: 'TRUSTED',
+    trustLevel: 'VERIFIED_OFFICIAL',
+    trustedFingerprint: '',
+    createdAt: '',
+    updatedAt: '',
+  },
+  {
+    id: 'tool_report_generator',
+    name: 'report_generator',
+    version: '1.0.0',
+    description: 'Generates analytical security summaries.',
+    inputSchema: { type: 'object', properties: {} },
+    permissions: ['reports:generate'],
+    riskClassification: 'SAFE',
+    capability: 'write',
+    status: 'TRUSTED',
+    trustLevel: 'VERIFIED_OFFICIAL',
+    trustedFingerprint: '',
+    createdAt: '',
+    updatedAt: '',
+  },
+  {
+    id: 'tool_email_sender',
+    name: 'email_sender',
+    version: '1.0.0',
+    description: 'Simulates dispatching notification summaries.',
+    inputSchema: { type: 'object', properties: {} },
+    permissions: ['network:email_dispatch_sim'],
+    riskClassification: 'SENSITIVE',
+    capability: 'exfiltration-capable',
+    status: 'TRUSTED',
+    trustLevel: 'INTERNAL_DEVELOPER',
+    trustedFingerprint: '',
+    createdAt: '',
+    updatedAt: '',
+  },
+];
+
+export const LiveMonitorView: React.FC<LiveMonitorProps> = ({ tools: initialTools }) => {
   const { showToast } = useToast();
+  const [toolsList, setToolsList] = useState<MCPToolDefinition[]>(
+    initialTools && initialTools.length > 0 ? initialTools : FALLBACK_DEFAULT_TOOLS
+  );
   const [selectedAgent, setSelectedAgent] = useState('ResearchAgent');
   const [selectedTool, setSelectedTool] = useState('file_reader');
   const [requestPath, setRequestPath] = useState('/reports/sales.txt');
@@ -35,6 +101,29 @@ export const LiveMonitorView: React.FC<LiveMonitorProps> = ({ tools }) => {
   const [isSimulatingTamper, setIsSimulatingTamper] = useState(false);
   const [loading, setLoading] = useState(false);
   const [lastExecution, setLastExecution] = useState<MCPToolExecuteResponse | null>(null);
+
+  React.useEffect(() => {
+    if (initialTools && initialTools.length > 0) {
+      setToolsList(initialTools);
+    } else {
+      fetch('/api/tools')
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.tools && Array.isArray(data.tools) && data.tools.length > 0) {
+            setToolsList(data.tools);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [initialTools]);
+
+  const handleToolChange = (toolName: string) => {
+    setSelectedTool(toolName);
+    if (toolName === 'file_reader') setRequestPath('/reports/sales.txt');
+    else if (toolName === 'search_tool') setRequestPath('quarterly security audit');
+    else if (toolName === 'report_generator') setRequestPath('Executive Performance Summary');
+    else if (toolName === 'email_sender') setRequestPath('team@enterprise.internal');
+  };
 
   const handleTestEvaluation = async () => {
     setLoading(true);
@@ -126,12 +215,12 @@ export const LiveMonitorView: React.FC<LiveMonitorProps> = ({ tools }) => {
             <label className="block text-xs font-semibold text-slate-300 mb-1.5">Target MCP Tool</label>
             <select
               value={selectedTool}
-              onChange={(e) => setSelectedTool(e.target.value)}
+              onChange={(e) => handleToolChange(e.target.value)}
               className="w-full bg-[#070c18] border border-[#182642] rounded-xl px-3.5 py-2.5 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
             >
-              {tools.map((t) => (
-                <option key={t.id} value={t.name}>
-                  {t.name} (v{t.version})
+              {toolsList.map((t) => (
+                <option key={t.id || t.name} value={t.name}>
+                  {t.name} (v{t.version}) [{t.capability || 'read-only'}]
                 </option>
               ))}
             </select>

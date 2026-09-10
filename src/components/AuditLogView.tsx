@@ -15,26 +15,84 @@ import {
   Clock,
   Terminal,
   Filter,
+  RefreshCw,
+  Radio,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SecurityEvent } from '@/types';
 import { useToast } from './ToastContext';
+import { useShieldEvents } from '@/lib/hooks/useShieldEvents';
 
 interface AuditLogViewProps {
-  events: SecurityEvent[];
+  events?: SecurityEvent[];
 }
 
-export const AuditLogView: React.FC<AuditLogViewProps> = ({ events }) => {
+export const AuditLogView: React.FC<AuditLogViewProps> = ({ events: initialEvents }) => {
   const { showToast } = useToast();
+  const [logEvents, setLogEvents] = useState<SecurityEvent[]>(initialEvents || []);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDecision, setSelectedDecision] = useState('ALL');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const filteredEvents = events.filter((e) => {
+  const { latestEvent, isConnected } = useShieldEvents();
+
+  // Fetch directly from /api/events on mount and refresh
+  const fetchAllEvents = React.useCallback(async (showNotification = false) => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/events?limit=200');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.events && Array.isArray(data.events)) {
+          setLogEvents(data.events);
+          if (showNotification) {
+            showToast('info', 'Logs Refreshed', `Synchronized ${data.events.length} security events.`);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch audit events:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [showToast]);
+
+  // Sync with prop
+  React.useEffect(() => {
+    if (initialEvents && initialEvents.length > 0) {
+      setLogEvents(initialEvents);
+    }
+  }, [initialEvents]);
+
+  // Periodic auto-polling every 2.5 seconds to guarantee live updates
+  React.useEffect(() => {
+    fetchAllEvents(false);
+    const interval = setInterval(() => {
+      fetchAllEvents(false);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [fetchAllEvents]);
+
+  // Append/update real-time SSE events immediately
+  React.useEffect(() => {
+    if (latestEvent?.event) {
+      const newEvt = latestEvent.event;
+      setLogEvents((prev) => {
+        const exists = prev.some((e) => e.id === newEvt.id);
+        if (exists) {
+          return prev.map((e) => (e.id === newEvt.id ? newEvt : e));
+        }
+        return [newEvt, ...prev];
+      });
+    }
+  }, [latestEvent]);
+
+  const filteredEvents = logEvents.filter((e) => {
     const matchesSearch =
-      e.toolName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.reason.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      e.agentId.toLowerCase().includes(searchQuery.toLowerCase());
+      (e.toolName || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e.reason || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (e.agentId || '').toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesDecision = selectedDecision === 'ALL' || e.decision === selectedDecision;
 
@@ -47,7 +105,7 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ events }) => {
 
   const exportLogsAsJson = () => {
     const dataStr =
-      'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(events, null, 2));
+      'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(logEvents, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
     downloadAnchor.setAttribute('download', `mcp_shield_audit_logs_${Date.now()}.json`);
@@ -59,13 +117,13 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ events }) => {
 
   const exportLogsAsCsv = () => {
     const headers = ['Timestamp', 'Agent', 'Tool', 'Decision', 'RiskScore', 'Reason'];
-    const rows = events.map((e) => [
+    const rows = logEvents.map((e) => [
       `"${e.timestamp}"`,
       `"${e.agentId}"`,
       `"${e.toolName}"`,
       `"${e.decision}"`,
       `"${e.riskScore}"`,
-      `"${e.reason.replace(/"/g, '""')}"`,
+      `"${(e.reason || '').replace(/"/g, '""')}"`,
     ]);
 
     const csvContent =
@@ -87,18 +145,34 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ events }) => {
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-[#0a1224] via-[#080e1d] to-[#050811] border border-[#1e2d4d] p-8 sm:p-10 shadow-2xl">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-2">
-            <span className="text-[10px] font-mono font-bold text-sky-400 uppercase tracking-widest px-2.5 py-1 rounded-full bg-sky-950/70 border border-sky-800">
-              IMMUTABLE FORENSIC AUDIT TRAIL
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-mono font-bold text-sky-400 uppercase tracking-widest px-2.5 py-1 rounded-full bg-sky-950/70 border border-sky-800">
+                IMMUTABLE FORENSIC AUDIT TRAIL
+              </span>
+              <span className="flex items-center space-x-1 text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-800 text-emerald-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>LIVE FEED ACTIVE</span>
+              </span>
+            </div>
             <h1 className="text-3xl sm:text-5xl font-black text-white font-sans tracking-tight">
               SECURITY TIMELINE & LOG
             </h1>
             <p className="text-xs sm:text-sm text-slate-300 max-w-xl">
-              Chronological ledger of every verification, hash evaluation, runtime block, and human approval decision.
+              Chronological ledger of every verification, hash evaluation, runtime block, and human approval decision. ({logEvents.length} recorded events)
             </p>
           </div>
 
           <div className="flex flex-wrap gap-2.5">
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={() => fetchAllEvents(true)}
+              disabled={loading}
+              className="px-4 py-2.5 bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800/80 rounded-xl text-xs font-bold font-mono flex items-center space-x-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-950/40"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>{loading ? 'SYNCING...' : 'REFRESH LOGS'}</span>
+            </motion.button>
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -141,7 +215,7 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ events }) => {
             onChange={(e) => setSelectedDecision(e.target.value)}
             className="bg-[#070c18] border border-[#182642] rounded-xl px-3.5 py-2 text-white focus:border-emerald-500 focus:outline-none"
           >
-            <option value="ALL">All Decisions ({events.length})</option>
+            <option value="ALL">All Decisions ({logEvents.length})</option>
             <option value="ALLOW">ALLOWED</option>
             <option value="REVIEW">REVIEW REQUIRED</option>
             <option value="BLOCK">BLOCKED</option>

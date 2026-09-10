@@ -63,12 +63,15 @@ class DataStore {
       this.policies.set(key, JSON.parse(JSON.stringify(policy)));
     }
 
-    // 3. Seed Initial Security Events (to make SOC dashboard look active and realistic)
+    // 3. Seed Initial Security Events (to make SOC dashboard & audit logs active and realistic)
     const now = new Date();
     const eventTimes = [
-      new Date(now.getTime() - 1000 * 60 * 15).toISOString(),
-      new Date(now.getTime() - 1000 * 60 * 10).toISOString(),
-      new Date(now.getTime() - 1000 * 60 * 5).toISOString(),
+      new Date(now.getTime() - 1000 * 60 * 35).toISOString(),
+      new Date(now.getTime() - 1000 * 60 * 25).toISOString(),
+      new Date(now.getTime() - 1000 * 60 * 18).toISOString(),
+      new Date(now.getTime() - 1000 * 60 * 12).toISOString(),
+      new Date(now.getTime() - 1000 * 60 * 8).toISOString(),
+      new Date(now.getTime() - 1000 * 60 * 3).toISOString(),
     ];
 
     this.recordSecurityEvent({
@@ -79,7 +82,8 @@ class DataStore {
       eventType: 'TOOL_EXECUTION',
       riskScore: 0,
       decision: 'ALLOW',
-      reason: 'Baseline verification successful. SHA-256 fingerprint verified.',
+      reason: 'Baseline verification successful. SHA-256 fingerprint verified (read-only scope).',
+      details: { parameters: { filePath: '/reports/sales.txt' } },
       timestamp: eventTimes[0],
       executed: true,
     });
@@ -92,7 +96,8 @@ class DataStore {
       eventType: 'TOOL_EXECUTION',
       riskScore: 0,
       decision: 'ALLOW',
-      reason: 'Integrity verified and policy allowed.',
+      reason: 'Integrity verified and agent role authorized for vector search.',
+      details: { parameters: { query: 'security policies' } },
       timestamp: eventTimes[1],
       executed: true,
     });
@@ -103,10 +108,53 @@ class DataStore {
       toolName: 'email_sender',
       agentId: 'ResearchAgent',
       eventType: 'UNAUTHORIZED_TOOL',
-      riskScore: 35,
+      riskScore: 70,
       decision: 'REVIEW',
-      reason: 'Agent policy requires developer/human approval for sensitive email dispatch.',
+      reason: 'Tool capability "exfiltration-capable" enforces policy floor (70). Human approval required.',
+      details: { parameters: { recipient: 'team@enterprise.internal', subject: 'Digest' } },
       timestamp: eventTimes[2],
+      executed: false,
+    });
+
+    this.recordSecurityEvent({
+      id: 'evt_init_4',
+      toolId: 'tool_file_reader',
+      toolName: 'file_reader',
+      agentId: 'CustomerSupportAgent',
+      eventType: 'PROMPT_INJECTION',
+      riskScore: 85,
+      decision: 'BLOCK',
+      reason: '[BLOCKED BEFORE EXECUTION] Parameter injection detected: path traversal and secret harvesting.',
+      details: { parameters: { filePath: '../../../../etc/shadow' } },
+      timestamp: eventTimes[3],
+      executed: false,
+    });
+
+    this.recordSecurityEvent({
+      id: 'evt_init_5',
+      toolId: 'tool_report_generator',
+      toolName: 'report_generator',
+      agentId: 'AdminAgent',
+      eventType: 'TOOL_EXECUTION',
+      riskScore: 10,
+      decision: 'ALLOW',
+      reason: 'Analytical report generated safely under AdminAgent authorization.',
+      details: { parameters: { title: 'Q3 Infrastructure Audit', format: 'summary' } },
+      timestamp: eventTimes[4],
+      executed: true,
+    });
+
+    this.recordSecurityEvent({
+      id: 'evt_init_6',
+      toolId: 'tool_file_reader',
+      toolName: 'file_reader',
+      agentId: 'ResearchAgent',
+      eventType: 'INTEGRITY_VIOLATION',
+      riskScore: 90,
+      decision: 'BLOCK',
+      reason: '[BLOCKED BEFORE EXECUTION] SHA-256 fingerprint mismatch vs registered baseline. Tool metadata modified.',
+      details: { checks: { integrity: { passed: false, mismatch: true } } },
+      timestamp: eventTimes[5],
       executed: false,
     });
   }
@@ -236,14 +284,40 @@ class DataStore {
   }
 
   public getPolicy(agentId: string): AgentPolicy | undefined {
-    return this.policies.get(agentId);
+    if (!agentId) return undefined;
+    const direct = this.policies.get(agentId);
+    if (direct) return direct;
+    return Array.from(this.policies.values()).find(
+      (p) => p.agentId.toLowerCase() === agentId.toLowerCase()
+    );
   }
 
-  public updatePolicy(agentId: string, policy: Partial<AgentPolicy>): AgentPolicy | null {
-    const existing = this.policies.get(agentId);
-    if (!existing) return null;
-    const updated = { ...existing, ...policy };
-    this.policies.set(agentId, updated);
+  public updatePolicy(agentId: string, policy: Partial<AgentPolicy>): AgentPolicy {
+    const existingKey =
+      Array.from(this.policies.keys()).find(
+        (k) => k.toLowerCase() === agentId.toLowerCase()
+      ) || agentId;
+
+    const existing = this.policies.get(existingKey) || {
+      agentId,
+      agentName: policy.agentName || agentId,
+      role: policy.role || 'ANALYST',
+      allowedTools: ['file_reader', 'search_tool', 'report_generator'],
+      reviewRequiredTools: ['email_sender'],
+      blockedTools: ['destructive_tool', 'bash_executor', 'credential_dumper'],
+      maxRiskThreshold: 60,
+      allowDynamicUpdates: true,
+    };
+
+    const updated: AgentPolicy = {
+      ...existing,
+      ...policy,
+      agentId: existing.agentId || agentId,
+      agentName: policy.agentName || existing.agentName || agentId,
+      role: policy.role || existing.role || 'ANALYST',
+    };
+
+    this.policies.set(existingKey, updated);
     return updated;
   }
 
@@ -271,7 +345,10 @@ class DataStore {
   }
 }
 
-// Global Singleton in Node runtime
-const globalForStore = global as unknown as { __mcpShieldStore: DataStore };
-export const db = globalForStore.__mcpShieldStore || new DataStore();
-if (process.env.NODE_ENV !== 'production') globalForStore.__mcpShieldStore = db;
+// Global Singleton in Node / Next.js runtime
+const globalForStore = globalThis as unknown as { __mcpShieldStore?: DataStore };
+export const db = globalForStore.__mcpShieldStore ?? new DataStore();
+if (process.env.NODE_ENV !== 'production') {
+  globalForStore.__mcpShieldStore = db;
+}
+

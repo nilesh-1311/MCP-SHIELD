@@ -52,18 +52,18 @@ export function calculateRisk(factors: RiskInputFactors): RiskEvaluation {
   }
 
   if (factors.credentialStealingDetected) {
-    score += 30;
-    reasons.push('Credential harvesting / secret exposure intent (+30)');
+    score += 35;
+    reasons.push('Credential harvesting / secret exposure intent (+35)');
   }
 
   if (factors.exfiltrationDetected) {
-    score += 25;
-    reasons.push('External network exfiltration instruction (+25)');
+    score += 35;
+    reasons.push('External network exfiltration instruction (+35)');
   }
 
   if (factors.dangerousParametersDetected) {
-    score += 25;
-    reasons.push('Dangerous path traversal or injection in parameters (+25)');
+    score += 30;
+    reasons.push('Dangerous path traversal or injection in parameters (+30)');
   }
 
   if (factors.maliciousOutputDetected) {
@@ -92,10 +92,11 @@ export function calculateRisk(factors: RiskInputFactors): RiskEvaluation {
   // Determine Policy Decision
   let decision: ShieldDecision = 'ALLOW';
 
-  // Hard blocking conditions
+  // Hard blocking conditions: Unregistered, Credential Theft, Exfiltration, Unauthorized, or High Risk
   if (
     factors.unregisteredTool ||
     factors.credentialStealingDetected ||
+    factors.exfiltrationDetected ||
     factors.unauthorizedTool ||
     (factors.fingerprintMismatch && factors.suspiciousInstructionDetected) ||
     finalScore >= (factors.agentMaxThreshold || 60)
@@ -110,5 +111,125 @@ export function calculateRisk(factors: RiskInputFactors): RiskEvaluation {
     riskLevel,
     decision,
     reasons: reasons.length > 0 ? reasons : ['All security integrity and authorization checks passed (0)'],
+  };
+}
+
+export interface ThreeLayerGateInput {
+  policyFloor: number; // e.g. 70 for destructive / exfiltration-capable, 0 otherwise
+  policyFloorReason?: string;
+  judgeScore: number; // 0-100 from LLM Judge
+  judgeReasoning?: string;
+  judgeThreatCategory?: string;
+  judgeFactors?: {
+    destructiveIntent?: boolean;
+    dataExfiltration?: boolean;
+    privilegeEscalation?: boolean;
+    argumentTampering?: boolean;
+  };
+  heuristicScore: number; // 0-100 from heuristic checks
+  heuristicReasons: string[];
+  heuristicDecision: ShieldDecision;
+  hasMaliciousThreats: boolean; // e.g. fingerprint mismatch + injection, rogue, exfil, credential theft
+  agentMaxThreshold?: number;
+}
+
+export interface ThreeLayerGateResult {
+  finalRiskScore: number;
+  riskLevel: ThreatSeverity;
+  decision: ShieldDecision;
+  reasons: string[];
+  policyFloor: number;
+  judgeScore: number;
+  heuristicScore: number;
+}
+
+/**
+ * 3-LAYER GATE RISK COMBINATION (Strictly Non-Additive, Max-Based)
+ * finalRiskScore = max(policyFloor, judgeScore, heuristicScore)
+ */
+export function combine3LayerRiskGate(input: ThreeLayerGateInput): ThreeLayerGateResult {
+  const {
+    policyFloor,
+    policyFloorReason,
+    judgeScore,
+    judgeReasoning,
+    judgeFactors,
+    heuristicScore,
+    heuristicReasons,
+    heuristicDecision,
+    hasMaliciousThreats,
+    agentMaxThreshold = 70,
+  } = input;
+
+  // STRICTLY NON-ADDITIVE MAX COMBINATION
+  const finalRiskScore = Math.min(100, Math.max(policyFloor, judgeScore, heuristicScore));
+
+  // Determine Severity Level
+  let riskLevel: ThreatSeverity = 'LOW';
+  if (finalRiskScore >= 80) {
+    riskLevel = 'CRITICAL';
+  } else if (finalRiskScore >= 60) {
+    riskLevel = 'HIGH';
+  } else if (finalRiskScore >= 30) {
+    riskLevel = 'MEDIUM';
+  }
+
+  const combinedReasons: string[] = [];
+
+  if (policyFloor > 0 && policyFloorReason) {
+    combinedReasons.push(`[Layer 1: Policy Floor] ${policyFloorReason} (Floor: ${policyFloor})`);
+  }
+
+  if (judgeScore > 0 && judgeReasoning) {
+    combinedReasons.push(`[Layer 2: LLM Judge] ${judgeReasoning} (Judge Score: ${judgeScore})`);
+  }
+
+  if (heuristicScore > 0 && heuristicReasons.length > 0) {
+    combinedReasons.push(`[Layer 3: Heuristics] ${heuristicReasons.join('; ')} (Heuristic Score: ${heuristicScore})`);
+  }
+
+  if (combinedReasons.length === 0) {
+    combinedReasons.push('All 3 security layers verified clean (0)');
+  }
+
+  // Decision Logic:
+  // If finalRiskScore >= 70:
+  // - If policyFloor >= 70 and no malicious attacks/violations detected -> REVIEW (approval required)
+  // - If malicious attacks, integrity violations, prompt injections, or high judge attack score -> BLOCK
+  // Else if finalRiskScore >= 40 -> REVIEW
+  // Else -> ALLOW
+  let decision: ShieldDecision = 'ALLOW';
+
+  const isMaliciousAttack =
+    hasMaliciousThreats ||
+    heuristicDecision === 'BLOCK' ||
+    Boolean(judgeFactors?.destructiveIntent) ||
+    Boolean(judgeFactors?.dataExfiltration) ||
+    Boolean(judgeFactors?.privilegeEscalation) ||
+    judgeScore >= 75 ||
+    heuristicScore >= 75;
+
+  if (finalRiskScore >= 70) {
+    if (isMaliciousAttack) {
+      decision = 'BLOCK';
+    } else if (policyFloor >= 70 || finalRiskScore >= 40) {
+      decision = 'REVIEW';
+    } else {
+      decision = 'BLOCK';
+    }
+  } else if (finalRiskScore >= 40 || heuristicDecision === 'REVIEW') {
+    decision = 'REVIEW';
+  } else {
+    decision = 'ALLOW';
+  }
+
+  return {
+    finalRiskScore,
+    riskLevel,
+    decision,
+    reasons: combinedReasons,
+    policyFloor,
+    judgeScore,
+    heuristicScore,
   };
 }

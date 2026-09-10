@@ -28,6 +28,7 @@ export function verifyToolIntegrity(
         inputSchema: currentRuntimeMetadata.inputSchema ?? trustedTool.inputSchema,
         permissions: currentRuntimeMetadata.permissions ?? trustedTool.permissions,
         riskClassification: currentRuntimeMetadata.riskClassification ?? trustedTool.riskClassification,
+        capability: currentRuntimeMetadata.capability ?? trustedTool.capability,
       })
     : trustedTool.trustedFingerprint;
 

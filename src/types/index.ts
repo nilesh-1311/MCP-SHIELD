@@ -4,6 +4,8 @@ export type TrustLevel = 'VERIFIED_OFFICIAL' | 'INTERNAL_DEVELOPER' | 'UNVERIFIE
 
 export type RiskClassification = 'SAFE' | 'SENSITIVE' | 'DANGEROUS';
 
+export type ToolCapability = 'read-only' | 'write' | 'destructive' | 'exfiltration-capable';
+
 export type ShieldDecision = 'ALLOW' | 'REVIEW' | 'BLOCK';
 
 export type ThreatType = 
@@ -15,7 +17,8 @@ export type ThreatType =
   | 'SUSPICIOUS_UPDATE'
   | 'CREDENTIAL_THEFT'
   | 'EXFILTRATION_ATTEMPT'
-  | 'PATH_TRAVERSAL';
+  | 'PATH_TRAVERSAL'
+  | 'DESTRUCTIVE_ACTION';
 
 export type ThreatSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -38,6 +41,7 @@ export interface MCPToolDefinition {
   inputSchema: ToolInputSchema;
   permissions: string[];
   riskClassification: RiskClassification;
+  capability: ToolCapability;
   author?: string;
   status: ToolStatus;
   trustLevel: TrustLevel;
@@ -89,6 +93,9 @@ export interface ShieldEvaluationResult {
   };
   toolName: string;
   agentId: string;
+  capability?: ToolCapability;
+  policyFloor?: number;
+  judgeResult?: any;
   timestamp: string;
   executionAllowed: boolean;
   requiresApproval: boolean;

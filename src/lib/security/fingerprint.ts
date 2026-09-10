@@ -1,5 +1,19 @@
 import crypto from 'crypto';
-import { MCPToolDefinition, ToolInputSchema } from '@/types';
+import { ToolInputSchema } from '@/types';
+import { getToolSourceCode } from '../mcp/toolSources';
+
+export { getToolSourceCode };
+
+/**
+ * Computes SHA-256 of the tool's verified source code
+ */
+export function getToolSourceCodeHash(toolName: string): string {
+  const code = getToolSourceCode(toolName);
+  if (!code) {
+    return '0000000000000000000000000000000000000000000000000000000000000000';
+  }
+  return crypto.createHash('sha256').update(code.trim(), 'utf8').digest('hex');
+}
 
 /**
  * Deterministically sort and canonicalize any JSON structure.
@@ -19,13 +33,11 @@ export function canonicalizeJson(obj: any): string {
   }
 
   if (Array.isArray(obj)) {
-    // Recursively canonicalize array elements
     const elements = obj.map((item) => canonicalizeJson(item));
     return `[${elements.join(',')}]`;
   }
 
   if (typeof obj === 'object') {
-    // Sort keys alphabetically
     const keys = Object.keys(obj).sort();
     const keyValues = keys.map((key) => {
       const canonicalVal = canonicalizeJson(obj[key]);
@@ -38,40 +50,52 @@ export function canonicalizeJson(obj: any): string {
 }
 
 /**
- * Extracts the security-critical canonical metadata subset of a tool
+ * Extracts the security-critical canonical metadata subset of a tool,
+ * including its physical source code hash.
  */
 export function extractCanonicalToolMetadata(tool: {
   name: string;
-  version: string;
+  version?: string;
   description: string;
-  inputSchema: ToolInputSchema;
-  permissions: string[];
+  inputSchema?: ToolInputSchema;
+  permissions?: string[];
   riskClassification?: string;
+  capability?: string;
+  sourceCode?: string;
 }): Record<string, any> {
+  const toolName = tool.name.trim().toLowerCase();
+  const sourceHash = tool.sourceCode
+    ? crypto.createHash('sha256').update(tool.sourceCode.trim(), 'utf8').digest('hex')
+    : getToolSourceCodeHash(toolName);
+
   return {
-    name: tool.name.trim().toLowerCase(),
-    version: tool.version.trim(),
+    name: toolName,
+    version: (tool.version || '1.0.0').trim(),
     description: tool.description.trim(),
     inputSchema: tool.inputSchema || { type: 'object', properties: {} },
     permissions: Array.from(new Set(tool.permissions || [])).sort(),
     riskClassification: tool.riskClassification || 'SAFE',
+    capability: tool.capability || 'read-only',
+    sourceCodeHash: sourceHash,
   };
 }
 
 /**
- * Computes the deterministic SHA-256 fingerprint for tool metadata
+ * Computes the deterministic SHA-256 fingerprint for tool metadata and source
  */
 export function calculateToolFingerprint(tool: {
   name: string;
-  version: string;
+  version?: string;
   description: string;
-  inputSchema: ToolInputSchema;
-  permissions: string[];
+  inputSchema?: ToolInputSchema;
+  permissions?: string[];
   riskClassification?: string;
+  capability?: string;
+  sourceCode?: string;
 }): string {
   const canonicalMetadata = extractCanonicalToolMetadata(tool);
   const canonicalString = canonicalizeJson(canonicalMetadata);
-  
+
   return crypto
     .createHash('sha256')
     .update(canonicalString, 'utf8')

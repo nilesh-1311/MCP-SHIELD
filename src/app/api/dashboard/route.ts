@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const tools = db.getTools();
-  const events = db.getSecurityEvents(50);
+  const events = db.getSecurityEvents(200);
   const threats = db.getThreats();
   const approvals = db.getApprovals();
   const policies = db.getPolicies();
@@ -49,6 +49,7 @@ export async function GET() {
       securityScore,
     },
     tools,
+    events,
     recentEvents: events.slice(0, 10),
     activeThreats: threats.slice(0, 8),
     pendingApprovals: approvals,

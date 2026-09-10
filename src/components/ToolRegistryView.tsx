@@ -23,7 +23,7 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MCPToolDefinition } from '@/types';
+import { MCPToolDefinition, ToolCapability } from '@/types';
 import { formatFingerprint } from '@/lib/security/fingerprint';
 import { useToast } from './ToastContext';
 
@@ -32,8 +32,78 @@ interface ToolRegistryProps {
   onRefresh: () => void;
 }
 
-export const ToolRegistryView: React.FC<ToolRegistryProps> = ({ tools, onRefresh }) => {
+const FALLBACK_DEFAULT_TOOLS: MCPToolDefinition[] = [
+  {
+    id: 'tool_file_reader',
+    name: 'file_reader',
+    version: '1.0.0',
+    description: 'Reads files from an approved project directory.',
+    inputSchema: { type: 'object', properties: { filePath: { type: 'string', description: 'Relative path' } } },
+    permissions: ['filesystem:read_approved'],
+    riskClassification: 'SAFE',
+    capability: 'read-only',
+    author: 'DevSecOps Team <security@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'VERIFIED_OFFICIAL',
+    trustedFingerprint: 'A7F39C01...B92D',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'tool_report_generator',
+    name: 'report_generator',
+    version: '1.0.0',
+    description: 'Generates analytical security and business summaries for authorized agents.',
+    inputSchema: { type: 'object', properties: { title: { type: 'string' } } },
+    permissions: ['analytics:read', 'reports:generate'],
+    riskClassification: 'SAFE',
+    capability: 'write',
+    author: 'Analytics Core <analytics@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'VERIFIED_OFFICIAL',
+    trustedFingerprint: 'E284D109...3C81',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'tool_search_tool',
+    name: 'search_tool',
+    version: '1.0.0',
+    description: 'Searches local vector indexed knowledge base and project documents.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+    permissions: ['knowledge_base:read'],
+    riskClassification: 'SAFE',
+    capability: 'read-only',
+    author: 'Search Core <search@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'VERIFIED_OFFICIAL',
+    trustedFingerprint: '94F1C7B2...AA04',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'tool_email_sender',
+    name: 'email_sender',
+    version: '1.0.0',
+    description: 'Simulates dispatching notification summaries to approved team email distribution lists.',
+    inputSchema: { type: 'object', properties: { recipient: { type: 'string' }, subject: { type: 'string' } } },
+    permissions: ['network:email_dispatch_sim'],
+    riskClassification: 'SENSITIVE',
+    capability: 'exfiltration-capable',
+    author: 'Communication Service <comms@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'INTERNAL_DEVELOPER',
+    trustedFingerprint: 'B382F99A...1109',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+];
+
+export const ToolRegistryView: React.FC<ToolRegistryProps> = ({ tools: initialTools, onRefresh }) => {
   const { showToast } = useToast();
+  const [toolsList, setToolsList] = useState<MCPToolDefinition[]>(
+    initialTools && initialTools.length > 0 ? initialTools : FALLBACK_DEFAULT_TOOLS
+  );
   const [selectedTool, setSelectedTool] = useState<MCPToolDefinition | null>(null);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -46,6 +116,7 @@ export const ToolRegistryView: React.FC<ToolRegistryProps> = ({ tools, onRefresh
   const [newToolDesc, setNewToolDesc] = useState('');
   const [newToolPermissions, setNewToolPermissions] = useState('filesystem:read_approved');
   const [newToolRisk, setNewToolRisk] = useState('SAFE');
+  const [newToolCapability, setNewToolCapability] = useState<ToolCapability>('read-only');
 
   // Update Tool Form State
   const [updateVersion, setUpdateVersion] = useState('');
@@ -54,7 +125,29 @@ export const ToolRegistryView: React.FC<ToolRegistryProps> = ({ tools, onRefresh
   const [updateError, setUpdateError] = useState('');
   const [updateSuccess, setUpdateSuccess] = useState('');
 
-  const filteredTools = tools.filter(
+  const fetchToolsDirectly = React.useCallback(async () => {
+    try {
+      const res = await fetch('/api/tools');
+      if (res.ok) {
+        const data = await res.json();
+        if (data.tools && Array.isArray(data.tools) && data.tools.length > 0) {
+          setToolsList(data.tools);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch tools directly:', err);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (initialTools && initialTools.length > 0) {
+      setToolsList(initialTools);
+    } else {
+      fetchToolsDirectly();
+    }
+  }, [initialTools, fetchToolsDirectly]);
+
+  const filteredTools = toolsList.filter(
     (t) =>
       t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       t.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -73,6 +166,7 @@ export const ToolRegistryView: React.FC<ToolRegistryProps> = ({ tools, onRefresh
           description: newToolDesc,
           permissions: newToolPermissions.split(',').map((s) => s.trim()),
           riskClassification: newToolRisk,
+          capability: newToolCapability,
         }),
       });
       if (res.ok) {
@@ -80,6 +174,7 @@ export const ToolRegistryView: React.FC<ToolRegistryProps> = ({ tools, onRefresh
         setNewToolName('');
         setNewToolDesc('');
         showToast('success', 'Tool Registered', `Tool '${newToolName}' registered with SHA-256 fingerprint baseline.`);
+        fetchToolsDirectly();
         onRefresh();
       }
     } catch (err) {

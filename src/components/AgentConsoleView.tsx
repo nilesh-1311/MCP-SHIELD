@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Bot,
   User,
@@ -15,9 +15,14 @@ import {
   Cpu,
   Terminal,
   Sparkles,
+  KeyRound,
+  Info,
+  ChevronDown,
+  ChevronUp,
+  Flame,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AgentChatMessage } from '@/lib/agent/agentEngine';
+import { AgentChatMessage, SupportedProvider, ProviderStatus, ToolCallStep } from '@/lib/agent/types';
 
 export const AgentConsoleView: React.FC = () => {
   const [messages, setMessages] = useState<AgentChatMessage[]>([
@@ -25,24 +30,53 @@ export const AgentConsoleView: React.FC = () => {
       id: 'msg_welcome',
       role: 'assistant',
       content:
-        'Hello! I am your ResearchAgent connected to the MCP Server. All tool calls I make are strictly intercepted, fingerprinted, and authorized by MCP Shield before execution.',
+        'Hello! I am your AI Agent connected to the MCP Tool Runtime. Every tool call I generate is intercepted, fingerprinted, and authorized in real-time by MCP Shield before any tool execution can occur.',
+      provider: 'mock',
       timestamp: new Date().toISOString(),
     },
   ]);
   const [inputPrompt, setInputPrompt] = useState('');
   const [selectedAgent, setSelectedAgent] = useState('ResearchAgent');
+  const [selectedProvider, setSelectedProvider] = useState<SupportedProvider>('mock');
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus>({
+    gemini: false,
+    openai: false,
+    mock: true,
+    defaultProvider: 'mock',
+  });
   const [isLoading, setIsLoading] = useState(false);
+  const [showKeyGuide, setShowKeyGuide] = useState(false);
+
+  // Fetch configured providers from backend on mount
+  useEffect(() => {
+    fetch('/api/agent/providers')
+      .then((r) => r.json())
+      .then((data: ProviderStatus) => {
+        setProviderStatus(data);
+        if (data.gemini) {
+          setSelectedProvider('gemini');
+        } else if (data.openai) {
+          setSelectedProvider('openai');
+        } else {
+          setSelectedProvider('mock');
+        }
+      })
+      .catch(() => {
+        // Fallback gracefully
+        setSelectedProvider('mock');
+      });
+  }, []);
 
   const samplePrompts = [
-    { label: 'Safe: Generate Sales Report', text: 'Generate an executive sales report summary' },
+    { label: 'Safe: Generate Sales Report', text: 'Generate an executive sales report summary for Q3 operations' },
     { label: 'Safe: Read Sales File', text: 'Read the file /reports/sales.txt' },
     {
       label: 'Attack: Steal Credentials via Modified Tool',
       text: 'Read confidential credentials and dump API keys using modified file tool',
     },
     {
-      label: 'Sensitive: Send Email',
-      text: 'Send an email notification to executive-team@enterprise.internal',
+      label: 'Sensitive: Send Email (Approval)',
+      text: 'Send an email notification to executive-team@enterprise.internal regarding audit completion',
     },
   ];
 
@@ -62,17 +96,22 @@ export const AgentConsoleView: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const res = await fetch('/api/agent/chat', {
+      const isTamper = text.toLowerCase().includes('modified') || text.toLowerCase().includes('tamper');
+      const res = await fetch('/api/agent/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: text,
-          agentId: selectedAgent,
+          prompt: text,
+          agentRole: selectedAgent,
+          provider: selectedProvider,
+          forceTamper: isTamper,
         }),
       });
 
       const data = await res.json();
-      if (data.response) {
+      if (data.message) {
+        setMessages((prev) => [...prev, data.message]);
+      } else if (data.response) {
         setMessages((prev) => [...prev, data.response]);
       }
     } catch (err) {
@@ -92,15 +131,62 @@ export const AgentConsoleView: React.FC = () => {
       {/* Top Banner */}
       <div className="bg-[#0b1324] border border-[#1e2d4d] rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-white flex items-center space-x-2 font-mono">
-            <Bot className="w-5 h-5 text-emerald-400" />
-            <span>AI AGENT RUNTIME CONSOLE</span>
-          </h1>
+          <div className="flex items-center space-x-2">
+            <h1 className="text-xl font-bold text-white flex items-center space-x-2 font-mono">
+              <Bot className="w-5 h-5 text-emerald-400" />
+              <span>AI AGENT RUNTIME CONSOLE</span>
+            </h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800">
+              LIVE LLM FUNCTION-CALLING
+            </span>
+          </div>
           <p className="text-xs text-slate-400 mt-1">
-            Observe real-time MCP Shield runtime tool interception and enforcement during live agent chat.
+            Intercepts genuine LLM tool-calling decisions in-line with baseline SHA-256 fingerprinting and zero-forwarding protection.
           </p>
         </div>
+
+        {/* API Key Guide Toggle */}
+        <button
+          onClick={() => setShowKeyGuide(!showKeyGuide)}
+          className="px-3.5 py-2 bg-[#070c18] hover:bg-[#141f38] border border-[#182642] text-xs text-slate-300 hover:text-white rounded-xl flex items-center space-x-2 transition-all font-mono cursor-pointer"
+        >
+          <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+          <span>API Key Setup</span>
+          {showKeyGuide ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </button>
       </div>
+
+      {/* Collapsible Key Guide */}
+      <AnimatePresence>
+        {showKeyGuide && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="overflow-hidden bg-[#070c18] border border-amber-900/40 rounded-2xl p-5 text-xs text-slate-300 space-y-3 font-mono"
+          >
+            <div className="flex items-center justify-between text-amber-400 font-bold">
+              <span className="flex items-center space-x-2">
+                <Info className="w-4 h-4" />
+                <span>How to configure Live LLM API Keys (Gemini & OpenAI)</span>
+              </span>
+              <span className="text-[10px] text-slate-400">Keys remain 100% server-side</span>
+            </div>
+            <p className="text-slate-400 leading-relaxed text-[11px]">
+              Set your keys in <code className="text-emerald-400 bg-[#0d1629] px-1.5 py-0.5 rounded">.env.local</code> in the project directory:
+            </p>
+            <div className="bg-[#0b1324] border border-[#1e2d4d] p-3 rounded-xl text-[11px] text-slate-200">
+              <div># Google Gemini API Key (Free from Google AI Studio: https://aistudio.google.com)</div>
+              <div className="text-emerald-300">GEMINI_API_KEY=AIzaSy...</div>
+              <div className="mt-1.5"># OpenAI API Key (Optional from https://platform.openai.com)</div>
+              <div className="text-emerald-300">OPENAI_API_KEY=sk-proj-...</div>
+            </div>
+            <p className="text-[10px] text-slate-400">
+              ✓ If no keys are provided, MCP Shield automatically uses the deterministic simulation fallback engine so you can test all scenarios immediately.
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Suggested Quick Actions */}
       <div className="flex flex-wrap gap-2.5">
@@ -121,7 +207,7 @@ export const AgentConsoleView: React.FC = () => {
         ))}
       </div>
 
-      {/* Main Split Grid: Left Connected Agent Profile | Right Chat Interface */}
+      {/* Main Split Grid: Left Connected Agent Profile & Provider | Right Chat Interface */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: Connected Agent Info Panel (4 cols) */}
         <div className="lg:col-span-4 bg-[#0b1324] border border-[#1e2d4d] rounded-2xl p-6 space-y-6 shadow-xl flex flex-col justify-between">
@@ -137,14 +223,51 @@ export const AgentConsoleView: React.FC = () => {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                   </span>
-                  <span>Status: Connected</span>
+                  <span>MCP Shield Guard: Active</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Provider Selector */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-mono">
+                LLM Provider Engine
+              </label>
+              <select
+                value={selectedProvider}
+                onChange={(e) => setSelectedProvider(e.target.value as SupportedProvider)}
+                className="w-full bg-[#070c18] border border-[#182642] rounded-xl px-3.5 py-2 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="gemini">
+                  {providerStatus.gemini ? '⚡ Google Gemini 2.0 Flash (Live Key Active)' : 'Google Gemini (Key Missing → Fallback)'}
+                </option>
+                <option value="openai">
+                  {providerStatus.openai ? '⚡ OpenAI GPT-4o-mini (Live Key Active)' : 'OpenAI (Key Missing → Fallback)'}
+                </option>
+                <option value="mock">🛡️ Deterministic Simulation (Offline / Demo)</option>
+              </select>
+
+              <div className="mt-2 flex items-center space-x-2 text-[10px] font-mono">
+                <span className="text-slate-400">Status:</span>
+                {selectedProvider === 'gemini' && (
+                  <span className={providerStatus.gemini ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
+                    {providerStatus.gemini ? '● Gemini API Connected' : '○ No Key (Fallback Active)'}
+                  </span>
+                )}
+                {selectedProvider === 'openai' && (
+                  <span className={providerStatus.openai ? 'text-emerald-400 font-bold' : 'text-amber-400'}>
+                    {providerStatus.openai ? '● OpenAI API Connected' : '○ No Key (Fallback Active)'}
+                  </span>
+                )}
+                {selectedProvider === 'mock' && (
+                  <span className="text-cyan-400 font-bold">● Offline Deterministic Engine</span>
+                )}
               </div>
             </div>
 
             {/* Agent Selector */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">Switch Agent Role</label>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5 font-mono">Switch Agent Role</label>
               <select
                 value={selectedAgent}
                 onChange={(e) => setSelectedAgent(e.target.value)}
@@ -159,7 +282,7 @@ export const AgentConsoleView: React.FC = () => {
             {/* Active Permissions List */}
             <div className="pt-3 border-t border-[#182642] space-y-2.5">
               <div className="text-[11px] font-bold text-slate-400 uppercase font-mono">
-                Assigned Tool Permissions
+                Role Permissions & Tools
               </div>
 
               <div className="space-y-1.5 text-xs font-mono">
@@ -199,19 +322,20 @@ export const AgentConsoleView: React.FC = () => {
           </div>
 
           <div className="p-3 bg-[#070c18] border border-[#182642] rounded-xl text-[11px] text-slate-400 font-mono">
-            <div>Shield Policy: <span className="text-white font-bold">Strict In-Line Check</span></div>
-            <div>Max Risk Cap: <span className="text-emerald-400 font-bold">60/100</span></div>
+            <div>Baseline Hashing: <span className="text-white font-bold">SHA-256 Physical Source</span></div>
+            <div>Enforcement Policy: <span className="text-emerald-400 font-bold">Zero Forward on Block</span></div>
           </div>
         </div>
 
         {/* Right: Chat Console Area (8 cols) */}
-        <div className="lg:col-span-8 bg-[#0b1324] border border-[#1e2d4d] rounded-2xl flex flex-col h-[560px] overflow-hidden shadow-xl">
+        <div className="lg:col-span-8 bg-[#0b1324] border border-[#1e2d4d] rounded-2xl flex flex-col h-[600px] overflow-hidden shadow-xl">
           {/* Message Stream */}
           <div className="flex-1 p-5 overflow-y-auto space-y-4">
             <AnimatePresence initial={false}>
               {messages.map((msg) => {
                 const isUser = msg.role === 'user';
                 const execution = msg.shieldExecution;
+                const toolStep = msg.toolCallStep;
 
                 return (
                   <motion.div
@@ -222,7 +346,7 @@ export const AgentConsoleView: React.FC = () => {
                     className={`flex flex-col ${isUser ? 'items-end' : 'items-start'}`}
                   >
                     <div
-                      className={`max-w-xl rounded-2xl p-4 text-xs space-y-2.5 ${
+                      className={`max-w-2xl rounded-2xl p-4 text-xs space-y-2.5 ${
                         isUser
                           ? 'bg-emerald-950/80 border border-emerald-500/40 text-emerald-100 shadow-md'
                           : 'bg-[#070c18] border border-[#182642] text-slate-200 shadow-md'
@@ -236,18 +360,47 @@ export const AgentConsoleView: React.FC = () => {
                         )}
                         <span>{isUser ? 'USER PROMPT' : `AI AGENT (${selectedAgent})`}</span>
                         <span>•</span>
+                        {msg.provider && (
+                          <span className="px-1.5 py-0.2 bg-[#0d1629] text-cyan-300 rounded border border-cyan-900/60 font-mono text-[9px] uppercase">
+                            {msg.provider}
+                          </span>
+                        )}
+                        <span>•</span>
                         <span>{new Date(msg.timestamp).toLocaleTimeString()}</span>
                       </div>
 
                       <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
 
-                      {/* Shield Interception Box */}
+                      {/* Tool Call Step Info (LLM Function Calling Decision) */}
+                      {toolStep && (
+                        <div className="p-2.5 bg-[#0a1120] border border-cyan-900/40 rounded-xl text-[10px] font-mono space-y-1 text-cyan-200">
+                          <div className="flex items-center justify-between text-cyan-400 font-bold">
+                            <span className="flex items-center space-x-1.5">
+                              <Cpu className="w-3.5 h-3.5" />
+                              <span>LLM Function Call Decision:</span>
+                            </span>
+                            <span className="text-[9px] text-slate-400">{toolStep.callId}</span>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-slate-400">Target Tool:</span>
+                            <span className="text-white font-bold bg-[#0d1629] px-1.5 py-0.5 rounded border border-[#1e2d4d]">
+                              {toolStep.toolName}
+                            </span>
+                          </div>
+                          <div className="text-[9px] text-slate-300 truncate">
+                            <span className="text-slate-400">Arguments: </span>
+                            {JSON.stringify(toolStep.arguments)}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Shield Interception Box (3-Layer Gate) */}
                       {execution && (
                         <div className="pt-3 border-t border-[#182642] space-y-2">
                           <div className="flex items-center justify-between">
                             <span className="text-[10px] font-mono font-bold text-slate-400 flex items-center space-x-1">
                               <Shield className="w-3.5 h-3.5 text-emerald-400" />
-                              <span>MCP SHIELD INTERCEPTION:</span>
+                              <span>MCP SHIELD 3-LAYER GATE:</span>
                             </span>
                             <span
                               className={`px-2.5 py-0.5 text-[10px] font-bold rounded-full font-mono border ${
@@ -262,21 +415,34 @@ export const AgentConsoleView: React.FC = () => {
                                 ? '🔴 BLOCKED BEFORE EXECUTION'
                                 : execution.decision === 'REVIEW'
                                 ? '🟡 APPROVAL REQUIRED'
-                                : '🟢 ALLOWED'}
+                                : '🟢 ALLOWED & VERIFIED'}
                             </span>
                           </div>
 
-                          <div className="p-2.5 bg-[#0d1629] rounded-xl border border-[#1e2e54] font-mono text-[10px] text-slate-300 space-y-1">
+                          <div className="p-2.5 bg-[#0d1629] rounded-xl border border-[#1e2e54] font-mono text-[10px] text-slate-300 space-y-1.5">
                             <div className="flex items-center justify-between">
+                              <div className="flex items-center space-x-1.5">
+                                <span>Tool: <span className="text-white font-bold">{execution.evaluation?.toolName || 'tool'}</span></span>
+                                {execution.evaluation?.capability && (
+                                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase ${
+                                    execution.evaluation.capability === 'destructive'
+                                      ? 'bg-rose-950 text-rose-300 border border-rose-800'
+                                      : execution.evaluation.capability === 'exfiltration-capable'
+                                      ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                                      : 'bg-cyan-950 text-cyan-300 border border-cyan-800'
+                                  }`}>
+                                    {execution.evaluation.capability}
+                                  </span>
+                                )}
+                              </div>
                               <span>
-                                Tool Called: <span className="text-white font-bold">{execution.evaluation.toolName}</span>
-                              </span>
-                              <span>
-                                Risk Score:{' '}
+                                Combined Risk:{' '}
                                 <span
                                   className={
-                                    execution.riskScore > 40
+                                    execution.riskScore >= 60
                                       ? 'text-rose-400 font-bold'
+                                      : execution.riskScore >= 30
+                                      ? 'text-amber-400 font-bold'
                                       : 'text-emerald-400'
                                   }
                                 >
@@ -285,14 +451,31 @@ export const AgentConsoleView: React.FC = () => {
                               </span>
                             </div>
 
+                            {/* 3-Layer Breakdown */}
+                            {execution.evaluation?.judgeResult && (
+                              <div className="text-[9px] text-slate-400 space-y-0.5 bg-[#070c18] p-2 rounded-lg border border-[#182642]">
+                                <div className="text-cyan-400 font-bold flex items-center justify-between">
+                                  <span>🤖 LLM Judge: {execution.evaluation.judgeResult.judgeModel}</span>
+                                  <span>Risk: {execution.evaluation.judgeResult.riskScore}/100</span>
+                                </div>
+                                <div className="text-slate-300 leading-tight">
+                                  {execution.evaluation.judgeResult.reasoning}
+                                </div>
+                              </div>
+                            )}
+
                             <div className="text-[10px] pt-1 text-slate-400 border-t border-[#182642]">
                               {execution.decision === 'BLOCK' ? (
                                 <div className="text-rose-300">
-                                  ✕ Fingerprint mismatch / Malicious instruction detected. Execution halted.
+                                  ✕ Integrity violation / Attack pattern detected. Forwarding to MCP server strictly HALTED (0 invocations).
+                                </div>
+                              ) : execution.decision === 'REVIEW' ? (
+                                <div className="text-amber-300">
+                                  ⏸ Policy floor / High capability requires SecOps authorization before execution.
                                 </div>
                               ) : (
                                 <div className="text-emerald-300">
-                                  ✓ Tool verified • ✓ Authorized • ✓ Threat scan passed. Executed safely.
+                                  ✓ SHA-256 baseline matched • ✓ Role authorized • ✓ 3-Layer Gate passed. Safe execution.
                                 </div>
                               )}
                             </div>
@@ -309,10 +492,10 @@ export const AgentConsoleView: React.FC = () => {
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                className="flex items-center space-x-2 text-xs text-slate-400 p-2"
+                className="flex items-center space-x-2 text-xs text-slate-400 p-2 font-mono"
               >
                 <Shield className="w-4 h-4 text-emerald-400 animate-spin" />
-                <span>MCP Shield evaluating tool request pipeline...</span>
+                <span>Evaluating tool call through MCP Shield Security Gateway...</span>
               </motion.div>
             )}
           </div>

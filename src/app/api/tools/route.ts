@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
       inputSchema: inputSchema || { type: 'object', properties: {} },
       permissions: permissions || ['filesystem:read_approved'],
       riskClassification: riskClassification || 'SAFE',
+      capability: (body.capability || 'read-only') as any,
       author: author || 'Developer Registration',
       status: 'TRUSTED',
       trustLevel: 'INTERNAL_DEVELOPER',

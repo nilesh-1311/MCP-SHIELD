@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/store';
+import { shieldEventBus } from '@/lib/events/eventBus';
+import { SecurityEvent } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,38 +13,49 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
-    const { agentId, allowedTools, reviewRequiredTools, blockedTools, maxRiskThreshold } = body;
+    const { agentId, agentName, role, allowedTools, reviewRequiredTools, blockedTools, maxRiskThreshold } = body;
 
     if (!agentId) {
       return NextResponse.json({ error: 'Missing agentId' }, { status: 400 });
     }
 
     const updated = db.updatePolicy(agentId, {
-      allowedTools,
-      reviewRequiredTools,
-      blockedTools,
-      maxRiskThreshold,
+      agentName,
+      role,
+      allowedTools: Array.isArray(allowedTools) ? allowedTools : [],
+      reviewRequiredTools: Array.isArray(reviewRequiredTools) ? reviewRequiredTools : [],
+      blockedTools: Array.isArray(blockedTools) ? blockedTools : [],
+      maxRiskThreshold: typeof maxRiskThreshold === 'number' ? maxRiskThreshold : 60,
     });
 
-    if (!updated) {
-      return NextResponse.json({ error: `Policy for agent '${agentId}' not found` }, { status: 404 });
-    }
-
-    db.recordSecurityEvent({
+    const secEvent: SecurityEvent = {
       id: `evt_pol_${Date.now()}`,
       toolId: 'all_tools',
       toolName: 'policy_manager',
-      agentId: 'AdminConsole',
+      agentId: agentId || 'AdminConsole',
       eventType: 'TOOL_UPDATED',
       riskScore: 0,
       decision: 'ALLOW',
-      reason: `Policy updated for agent '${agentId}'.`,
+      reason: `RBAC Access Policy updated for agent '${updated.agentName || agentId}' (Threshold: ${updated.maxRiskThreshold}/100, Allowed: ${updated.allowedTools.length}, Blocked: ${updated.blockedTools.length}).`,
+      details: { policy: updated },
       timestamp: new Date().toISOString(),
       executed: true,
-    });
+    };
 
-    return NextResponse.json({ success: true, policy: updated });
+    db.recordSecurityEvent(secEvent);
+    shieldEventBus.emitShieldEvent(secEvent);
+
+    return NextResponse.json({
+      success: true,
+      policy: updated,
+      policies: db.getPolicies(),
+    });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
+export async function POST(req: NextRequest) {
+  return PUT(req);
+}
+

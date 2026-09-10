@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db/store';
+import { shieldEventBus } from '@/lib/events/eventBus';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,19 +23,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Approval request not found' }, { status: 404 });
     }
 
-    db.recordSecurityEvent({
+    const secEvent = {
       id: `evt_appr_${Date.now()}`,
       toolId: updated.toolId,
       toolName: updated.toolName,
       agentId: decidedBy || 'Security Administrator',
-      eventType: decision === 'APPROVED' ? 'APPROVAL_GRANTED' : 'APPROVAL_REJECTED',
+      eventType: decision === 'APPROVED' ? ('APPROVAL_GRANTED' as const) : ('APPROVAL_REJECTED' as const),
       riskScore: updated.riskScore,
-      decision: decision === 'APPROVED' ? 'ALLOW' : 'BLOCK',
+      decision: decision === 'APPROVED' ? ('ALLOW' as const) : ('BLOCK' as const),
       reason: `Human review decision '${decision}' by ${decidedBy || 'SecOps Admin'}.`,
       details: { approvalId },
       timestamp: new Date().toISOString(),
       executed: false,
-    });
+    };
+
+    db.recordSecurityEvent(secEvent);
+    shieldEventBus.emitShieldEvent(secEvent);
 
     return NextResponse.json({ success: true, approval: updated });
   } catch (err: any) {

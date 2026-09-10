@@ -1,0 +1,12 @@
+{
+  "project": "Project Alpha - Autonomous Agent Fleet",
+  "version": "2.4.0",
+  "environment": "production",
+  "agents": [
+    "ResearchAgent",
+    "AdminAgent",
+    "CustomerSupportAgent"
+  ],
+  "mcpGateway": "MCP Shield v1.0.0",
+  "securityLevel": "STRICT_ENFORCEMENT"
+}

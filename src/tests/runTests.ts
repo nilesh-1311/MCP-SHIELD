@@ -142,12 +142,15 @@ async function runAllTests() {
   console.log('========================================================================\n');
 
   if (passedTests === totalTests) {
-    console.log('🎉 ALL ADVANCED SECURITY & EXECUTION PROOF ACCEPTANCE TESTS PASSED!');
+    console.log('🎉 ALL ADVANCED SECURITY & EXECUTION PROOF ACCEPTANCE TESTS PASSED!\n');
+    await run3LayerGateTests();
   } else {
     console.error('❌ SOME TESTS FAILED.');
     process.exit(1);
   }
 }
+
+import { run3LayerGateTests } from './test3LayerGate';
 
 runAllTests().catch((err) => {
   console.error('Test Runner encountered unhandled error:', err);

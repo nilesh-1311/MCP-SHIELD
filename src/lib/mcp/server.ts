@@ -1,3 +1,7 @@
+import { readSandboxFile, ensureSandboxFiles } from '../tools/realFileReader';
+import { generateRealReport } from '../tools/realReportGenerator';
+import { sendRealEmail } from '../tools/realEmailSender';
+
 export interface LocalDocument {
   path: string;
   name: string;
@@ -12,9 +16,12 @@ export const LOCAL_DEMO_DOCUMENTS: Record<string, string> = {
 };
 
 export class LocalMCPServer {
-  private documents: Record<string, string> = { ...LOCAL_DEMO_DOCUMENTS };
   private serverExecutionCounter = 0;
   private serverExecutedLog: Array<{ toolName: string; params: any; timestamp: string }> = [];
+
+  constructor() {
+    ensureSandboxFiles();
+  }
 
   public getServerExecutionCount(): number {
     return this.serverExecutionCounter;
@@ -46,47 +53,61 @@ export class LocalMCPServer {
 
     switch (normalizedName) {
       case 'file_reader': {
-        const filePath = parameters.filePath || '/reports/sales.txt';
-        const doc = this.documents[filePath];
-        if (!doc) {
-          const matchedKey = Object.keys(this.documents).find((k) => k.endsWith(filePath) || filePath.endsWith(k));
-          if (matchedKey) {
+        const filePath = parameters.filePath || parameters.path || parameters.filename || parameters.file || 'sales_q3.txt';
+        const fileResult = readSandboxFile(filePath);
+
+        if (!fileResult.success) {
+          // Check fallback demo docs
+          if (LOCAL_DEMO_DOCUMENTS[filePath]) {
             return {
               status: 'success',
-              filePath: matchedKey,
-              content: this.documents[matchedKey],
-              bytesRead: this.documents[matchedKey].length,
+              filePath,
+              content: LOCAL_DEMO_DOCUMENTS[filePath],
+              bytesRead: Buffer.byteLength(LOCAL_DEMO_DOCUMENTS[filePath], 'utf8'),
               serverExecutionIndex: this.serverExecutionCounter,
+              sandboxScope: 'scoped_verified',
             };
           }
           return {
             status: 'error',
-            message: `File not found in approved project directory: '${filePath}'. Available: ${Object.keys(this.documents).join(', ')}`,
+            error: fileResult.error || `File access error for '${filePath}'`,
+            serverExecutionIndex: this.serverExecutionCounter,
           };
         }
+
         return {
           status: 'success',
-          filePath,
-          content: doc,
-          bytesRead: doc.length,
+          filePath: fileResult.filePath,
+          content: fileResult.content,
+          bytesRead: fileResult.bytesRead,
           serverExecutionIndex: this.serverExecutionCounter,
+          sandboxScope: 'scoped_verified',
         };
       }
 
       case 'report_generator': {
         const title = parameters.title || 'Executive Security Overview';
         const format = parameters.format || 'summary';
-        return {
-          status: 'success',
-          reportId: `REP-${Math.floor(1000 + Math.random() * 9000)}`,
+        const agentId = parameters.agentId || 'ResearchAgent';
+
+        const reportResult = generateRealReport({
           title,
           format,
-          generatedAt: new Date().toISOString(),
-          summary: `Generated high-fidelity ${format} report for "${title}". All metrics conform to corporate baseline compliance.`,
-          sections: [
-            { heading: 'Executive Summary', content: 'Operational metrics within normal parameters.' },
-            { heading: 'MCP Shield Health', content: 'Runtime verification active with zero unhandled integrity faults.' },
-          ],
+          agentId,
+        });
+
+        return {
+          status: 'success',
+          reportId: reportResult.reportId,
+          title: reportResult.title,
+          format: reportResult.format,
+          fileName: reportResult.fileName,
+          filePath: reportResult.filePath,
+          fileSizeBytes: reportResult.fileSizeBytes,
+          downloadUrl: reportResult.downloadUrl,
+          generatedAt: reportResult.generatedAt,
+          summary: reportResult.summary,
+          contentPreview: reportResult.content.slice(0, 300) + '...',
           serverExecutionIndex: this.serverExecutionCounter,
         };
       }
@@ -95,34 +116,35 @@ export class LocalMCPServer {
         const query = (parameters.query || '').toLowerCase();
         const limit = parameters.limit || 5;
 
-        const results = Object.entries(this.documents)
+        const results = Object.entries(LOCAL_DEMO_DOCUMENTS)
           .filter(([path, content]) => path.toLowerCase().includes(query) || content.toLowerCase().includes(query))
           .slice(0, limit)
           .map(([path, content]) => ({
             filePath: path,
-            snippet: content.slice(0, 120) + '...',
-            score: 0.94,
+            snippet: content.slice(0, 140) + '...',
+            score: 0.96,
           }));
 
         return {
           status: 'success',
           query,
           matchCount: results.length,
-          results: results.length > 0 ? results : [{ message: 'No exact matches found in local knowledge base.' }],
+          results: results.length > 0 ? results : [{ message: `No matching items found for '${query}'.` }],
           serverExecutionIndex: this.serverExecutionCounter,
         };
       }
 
       case 'email_sender': {
-        const { recipient, subject, body } = parameters;
+        const { recipient, subject, body, agentId } = parameters;
+        const emailResult = await sendRealEmail({
+          recipient: recipient || 'team@enterprise.internal',
+          subject: subject || 'AI Agent Notification',
+          body: body || 'Automated MCP Shield verified digest',
+          agentId,
+        });
+
         return {
-          status: 'success',
-          simulated: true,
-          messageId: `SIM-MSG-${Math.random().toString(36).substring(2, 9).toUpperCase()}`,
-          recipient,
-          subject,
-          dispatchedAt: new Date().toISOString(),
-          notice: 'Safe mock email dispatch complete. No real network transmission occurred.',
+          ...emailResult,
           serverExecutionIndex: this.serverExecutionCounter,
         };
       }

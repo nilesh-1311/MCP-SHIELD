@@ -6,23 +6,27 @@ import {
   SecurityEvent,
   ThreatRecord,
   ShieldDecision,
+  ToolCapability,
 } from '@/types';
 import { db } from '../db/store';
 import { verifyToolIntegrity, toSecurityCheckItem } from './integrity';
 import { checkAuthorization, toAuthorizationCheckItem } from './authorization';
 import { scanToolDescription, toDescriptionCheckItem } from './threatScanner';
 import { scanToolRequestParameters, toRequestCheckItem } from './requestScanner';
-import { scanAndSanitizeToolOutput, toOutputCheckItem } from './outputScanner';
-import { calculateRisk } from './riskEngine';
-import { localMcpServer } from '../mcp/server';
+import { calculateRisk, combine3LayerRiskGate } from './riskEngine';
 import { detectCrossServerHijacking } from './crossServerDetector';
 import { detectPermissionEscalation } from './permissionDetector';
 import { detectRogueTool } from './rogueToolDetector';
 import { detectDataExfiltration } from './exfiltrationDetector';
 import { calculateToolTrustScore, TrustScoreBreakdown } from './trustEngine';
+import { evaluateOfflineJudge, LLMJudgeResult } from './llmJudge';
+import { evaluateToolCall } from './evaluator';
 
 export interface UpgradedShieldEvaluationResult extends ShieldEvaluationResult {
   trustScore: TrustScoreBreakdown;
+  capability?: ToolCapability;
+  policyFloor?: number;
+  judgeResult?: LLMJudgeResult;
   crossServerCheck?: {
     detected: boolean;
     sourceServer: string;
@@ -41,11 +45,19 @@ export interface UpgradedShieldEvaluationResult extends ShieldEvaluationResult {
   };
 }
 
+export interface ShieldEvaluationOptions {
+  judgeResult?: LLMJudgeResult;
+  userPrompt?: string;
+}
+
 export class MCPShieldEngine {
   /**
-   * Performs the full pre-execution security verification pipeline with advanced detectors
+   * Performs the full pre-execution security verification pipeline with 3-Layer Gate
    */
-  public evaluate(request: MCPToolExecuteRequest): UpgradedShieldEvaluationResult {
+  public evaluate(
+    request: MCPToolExecuteRequest,
+    options?: ShieldEvaluationOptions
+  ): UpgradedShieldEvaluationResult {
     const { toolName, agentId, parameters, currentToolMetadata } = request;
     const timestamp = new Date().toISOString();
 
@@ -119,6 +131,13 @@ export class MCPShieldEngine {
       };
     }
 
+    // LAYER 1: Capability & Hard Policy Floor
+    const capability: ToolCapability = (currentToolMetadata?.capability || registeredTool.capability || 'read-only') as ToolCapability;
+    const policyFloor = (capability === 'destructive' || capability === 'exfiltration-capable') ? 70 : 0;
+    const policyFloorReason = policyFloor > 0
+      ? `Tool capability '${capability}' mandates a hard minimum baseline policy floor of 70 (REVIEW).`
+      : undefined;
+
     // CHECK 2: SHA-256 Fingerprint & Integrity Verification
     const integrityResult = verifyToolIntegrity(registeredTool, currentToolMetadata);
     const integrityCheckItem = toSecurityCheckItem(integrityResult);
@@ -149,11 +168,21 @@ export class MCPShieldEngine {
     const requestScanResult = scanToolRequestParameters(toolName, parameters);
     const requestCheckItem = toRequestCheckItem(requestScanResult);
 
-    // Evaluate Combined Transparent Risk Score
+    // LAYER 2: LLM-Judge Layer
+    const judgeResult: LLMJudgeResult = options?.judgeResult || evaluateOfflineJudge({
+      userPrompt: options?.userPrompt,
+      toolName,
+      arguments: parameters,
+      toolCapability: capability,
+      toolDescription: descriptionToScan,
+      agentRole: agentId,
+    });
+
+    // LAYER 3: Heuristic Threat Scanners
     const hasCredThreat = threatScanResult.threatsDetected.some((t) => t.category === 'CREDENTIAL_THEFT');
     const hasExfilThreat = threatScanResult.threatsDetected.some((t) => t.category === 'EXFILTRATION_ATTEMPT') || exfilParamResult.detected;
 
-    const risk = calculateRisk({
+    const heuristicRisk = calculateRisk({
       unregisteredTool: rogueCheck.isRogue && !isRegistered,
       fingerprintMismatch: integrityResult.mismatch,
       unauthorizedTool: authResult.status === 'BLOCKED',
@@ -166,10 +195,25 @@ export class MCPShieldEngine {
       agentMaxThreshold: policy?.maxRiskThreshold,
     });
 
-    const reasons = [...risk.reasons];
-    if (crossServerResult.detected) reasons.push(crossServerResult.message);
-    if (permEscalationResult.detected) reasons.push(permEscalationResult.message);
-    if (exfilParamResult.detected) reasons.push(exfilParamResult.message);
+    const heuristicReasons = [...heuristicRisk.reasons];
+    if (crossServerResult.detected) heuristicReasons.push(crossServerResult.message);
+    if (permEscalationResult.detected) heuristicReasons.push(permEscalationResult.message);
+    if (exfilParamResult.detected) heuristicReasons.push(exfilParamResult.message);
+
+    // COMBINE 3-LAYER GATE (Non-Additive: max(policyFloor, judgeScore, heuristicScore))
+    const combinedGate = combine3LayerRiskGate({
+      policyFloor,
+      policyFloorReason,
+      judgeScore: judgeResult.riskScore,
+      judgeReasoning: judgeResult.reasoning,
+      judgeThreatCategory: judgeResult.threatCategory,
+      judgeFactors: judgeResult.factors,
+      heuristicScore: heuristicRisk.riskScore,
+      heuristicReasons,
+      heuristicDecision: heuristicRisk.decision,
+      hasMaliciousThreats: !integrityResult.passed || rogueCheck.isRogue || hasCredThreat || hasExfilThreat || crossServerResult.detected,
+      agentMaxThreshold: policy?.maxRiskThreshold,
+    });
 
     const activeThreats = db.getThreats();
     const trustScore = calculateToolTrustScore(registeredTool, activeThreats);
@@ -178,20 +222,20 @@ export class MCPShieldEngine {
       trustScore.level = 'UNTRUSTED';
     }
 
-    const executionAllowed = risk.decision === 'ALLOW' && !crossServerResult.detected && !exfilParamResult.detected;
-    const requiresApproval = risk.decision === 'REVIEW' || permEscalationResult.detected;
+    const executionAllowed = combinedGate.decision === 'ALLOW' && !crossServerResult.detected && !exfilParamResult.detected;
+    const requiresApproval = combinedGate.decision === 'REVIEW' || permEscalationResult.detected;
 
     return {
-      decision: executionAllowed ? 'ALLOW' : (requiresApproval ? 'REVIEW' : 'BLOCK'),
-      riskScore: risk.riskScore,
-      riskLevel: risk.riskLevel,
-      reasons,
+      decision: combinedGate.decision,
+      riskScore: combinedGate.finalRiskScore,
+      riskLevel: combinedGate.riskLevel,
+      reasons: combinedGate.reasons,
       checks: {
         toolExistence: {
           name: 'Tool Identity & Registration Check',
           passed: isRegistered,
           scoreImpact: 0,
-          message: `Tool '${toolName}' verified in registry (Status: ${registeredTool.status}).`,
+          message: `Tool '${toolName}' verified in registry (Status: ${registeredTool.status}, Capability: ${capability}).`,
         },
         integrity: integrityCheckItem,
         authorization: authCheckItem,
@@ -204,6 +248,9 @@ export class MCPShieldEngine {
       executionAllowed,
       requiresApproval,
       trustScore,
+      capability,
+      policyFloor,
+      judgeResult,
       crossServerCheck: {
         detected: crossServerResult.detected,
         sourceServer: crossServerResult.sourceServer,
@@ -225,229 +272,24 @@ export class MCPShieldEngine {
 
   /**
    * Main Intercepted Execution Entry Point
-   * Strictly enforces security decisions BEFORE execution.
+   * Strictly delegates to the central evaluateToolCall interceptor.
    */
   public async interceptAndExecute(
     request: MCPToolExecuteRequest,
-    isPreApproved = false
+    isPreApproved = false,
+    options?: ShieldEvaluationOptions
   ): Promise<MCPToolExecuteResponse> {
-    const { toolName, agentId, parameters, currentToolMetadata } = request;
-    const evaluation = this.evaluate(request);
-    const eventId = `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const tool = db.getToolByName(toolName);
-
-    // Record Detected Threats
-    if (evaluation.riskScore >= 30 || evaluation.decision === 'BLOCK') {
-      if (!evaluation.checks.integrity.passed) {
-        db.recordThreat({
-          id: `thr_${Date.now()}_int`,
-          toolId: tool?.id || 'unknown',
-          toolName,
-          agentId,
-          type: 'INTEGRITY_VIOLATION',
-          severity: evaluation.riskLevel,
-          description: evaluation.checks.integrity.message,
-          evidence: JSON.stringify({
-            trustedFingerprint: evaluation.checks.integrity.details?.trustedFingerprint,
-            currentFingerprint: evaluation.checks.integrity.details?.currentFingerprint,
-          }),
-          status: 'ACTIVE',
-          timestamp: evaluation.timestamp,
-          actionTaken: evaluation.decision,
-        });
+    return evaluateToolCall(
+      request.agentId,
+      request.toolName,
+      request.parameters,
+      {
+        currentToolMetadata: request.currentToolMetadata,
+        isPreApproved,
+        userPrompt: options?.userPrompt,
+        judgeResult: options?.judgeResult,
       }
-
-      if (evaluation.crossServerCheck?.detected) {
-        db.recordThreat({
-          id: `thr_${Date.now()}_cross`,
-          toolId: tool?.id || 'unknown',
-          toolName,
-          agentId,
-          type: 'UNAUTHORIZED_TOOL',
-          severity: 'CRITICAL',
-          description: evaluation.crossServerCheck.message,
-          evidence: `Source: ${evaluation.crossServerCheck.sourceServer} -> Target: ${evaluation.crossServerCheck.targetServer}`,
-          status: 'ACTIVE',
-          timestamp: evaluation.timestamp,
-          actionTaken: 'BLOCK',
-        });
-      }
-
-      if (evaluation.dataExfiltrationCheck?.detected) {
-        db.recordThreat({
-          id: `thr_${Date.now()}_exfil`,
-          toolId: tool?.id || 'unknown',
-          toolName,
-          agentId,
-          type: 'EXFILTRATION_ATTEMPT',
-          severity: 'CRITICAL',
-          description: evaluation.dataExfiltrationCheck.message,
-          evidence: JSON.stringify(parameters),
-          status: 'ACTIVE',
-          timestamp: evaluation.timestamp,
-          actionTaken: 'BLOCK',
-        });
-      }
-    }
-
-    // 1. HARD BLOCK ENFORCEMENT
-    if (evaluation.decision === 'BLOCK') {
-      db.recordSecurityEvent({
-        id: eventId,
-        toolId: tool?.id || 'unknown',
-        toolName,
-        agentId,
-        eventType: 'INTEGRITY_VIOLATION',
-        riskScore: evaluation.riskScore,
-        decision: 'BLOCK',
-        reason: `[BLOCKED BEFORE EXECUTION] ${evaluation.reasons.join(' | ')}`,
-        details: { parameters, checks: evaluation.checks },
-        timestamp: evaluation.timestamp,
-        executed: false,
-      });
-
-      return {
-        success: false,
-        decision: 'BLOCK',
-        riskScore: evaluation.riskScore,
-        executed: false,
-        error: `MCP Shield Runtime Interception: Execution BLOCKED. Reasons: ${evaluation.reasons.join('; ')}`,
-        evaluation,
-        eventId,
-      };
-    }
-
-    // 2. REVIEW REQUIRED
-    if (evaluation.decision === 'REVIEW' && !isPreApproved) {
-      const approvalId = `app_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      db.createApprovalRequest({
-        id: approvalId,
-        toolId: tool?.id || 'unknown',
-        toolName,
-        version: tool?.version || '1.0.0',
-        requestedBy: agentId,
-        agentId,
-        proposedFingerprint: evaluation.checks.integrity.details?.currentFingerprint || tool?.trustedFingerprint || '',
-        previousFingerprint: tool?.trustedFingerprint,
-        changesSummary: evaluation.reasons.join(', '),
-        riskScore: evaluation.riskScore,
-        status: 'PENDING',
-        createdAt: evaluation.timestamp,
-      });
-
-      db.recordSecurityEvent({
-        id: eventId,
-        toolId: tool?.id || 'unknown',
-        toolName,
-        agentId,
-        eventType: 'UNAUTHORIZED_TOOL',
-        riskScore: evaluation.riskScore,
-        decision: 'REVIEW',
-        reason: `[APPROVAL REQUIRED] Execution paused for developer review. Approval Request: ${approvalId}`,
-        details: { parameters, approvalId },
-        timestamp: evaluation.timestamp,
-        executed: false,
-      });
-
-      evaluation.approvalId = approvalId;
-
-      return {
-        success: false,
-        decision: 'REVIEW',
-        riskScore: evaluation.riskScore,
-        executed: false,
-        error: `MCP Shield Notice: Tool execution requires human/developer approval (ID: ${approvalId}).`,
-        evaluation,
-        eventId,
-      };
-    }
-
-    // 3. ALLOWED: Forward to MCP Server
-    let rawResult: any;
-    try {
-      rawResult = await localMcpServer.executeTool(toolName, parameters);
-    } catch (err: any) {
-      return {
-        success: false,
-        decision: 'ALLOW',
-        riskScore: evaluation.riskScore,
-        executed: true,
-        error: `MCP Server Execution Error: ${err?.message || 'Unknown error'}`,
-        evaluation,
-        eventId,
-      };
-    }
-
-    // Check Output Poisoning & Exfiltration in tool return payload
-    const outputScanResult = scanAndSanitizeToolOutput(rawResult);
-    const outputExfil = detectDataExfiltration(rawResult);
-    const outputCheckItem = toOutputCheckItem(outputScanResult);
-    evaluation.checks.outputScan = outputCheckItem;
-
-    if (!outputScanResult.passed || outputExfil.detected) {
-      db.recordThreat({
-        id: `thr_${Date.now()}_out`,
-        toolId: tool?.id || 'unknown',
-        toolName,
-        agentId,
-        type: 'MALICIOUS_OUTPUT',
-        severity: 'CRITICAL',
-        description: outputScanResult.message + (outputExfil.detected ? ` ${outputExfil.message}` : ''),
-        evidence: JSON.stringify(rawResult),
-        status: 'ACTIVE',
-        timestamp: new Date().toISOString(),
-        actionTaken: 'BLOCK',
-      });
-
-      db.recordSecurityEvent({
-        id: eventId,
-        toolId: tool?.id || 'unknown',
-        toolName,
-        agentId,
-        eventType: 'MALICIOUS_OUTPUT',
-        riskScore: 75,
-        decision: 'BLOCK',
-        reason: `[OUTPUT POISONING DETECTED] Tool output contained malicious payload and was sanitized by Shield before reaching AI Agent.`,
-        details: { outputScanResult },
-        timestamp: new Date().toISOString(),
-        executed: true,
-      });
-
-      return {
-        success: true,
-        decision: 'ALLOW',
-        riskScore: 75,
-        executed: true,
-        result: outputScanResult.cleanOutput,
-        evaluation,
-        eventId,
-      };
-    }
-
-    // Safe execution record
-    db.recordSecurityEvent({
-      id: eventId,
-      toolId: tool?.id || 'unknown',
-      toolName,
-      agentId,
-      eventType: 'TOOL_EXECUTION',
-      riskScore: evaluation.riskScore,
-      decision: 'ALLOW',
-      reason: `Tool execution verified and authorized. Zero threats detected.`,
-      details: { parameters },
-      timestamp: evaluation.timestamp,
-      executed: true,
-    });
-
-    return {
-      success: true,
-      decision: 'ALLOW',
-      riskScore: evaluation.riskScore,
-      executed: true,
-      result: rawResult,
-      evaluation,
-      eventId,
-    };
+    );
   }
 }
 
