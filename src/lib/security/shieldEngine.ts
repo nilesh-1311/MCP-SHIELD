@@ -67,6 +67,66 @@ export class MCPShieldEngine {
     // DETECTOR 1: Rogue Tool Detection
     const rogueCheck = detectRogueTool(toolName, currentToolMetadata, isRegistered);
 
+    // =========================================================================
+    // HONEYPOT / DECOY CANARY DETECTION
+    // Invocation alone is treated as a near-100%-confidence compromise signal.
+    // =========================================================================
+    if (registeredTool?.isHoneypot) {
+      return {
+        decision: 'BLOCK',
+        riskScore: 100,
+        riskLevel: 'CRITICAL',
+        reasons: [
+          `[CRITICAL HONEYPOT TRIPWIRE] Decoy canary tool '${toolName}' was invoked by agent '${agentId}'. Near-100% confidence compromise signal detected! Invocation permanently blocked (+100).`,
+        ],
+        checks: {
+          toolExistence: {
+            name: 'Tool Identity & Registration Check',
+            passed: true,
+            scoreImpact: 0,
+            message: `Decoy canary tool '${toolName}' detected.`,
+          },
+          integrity: {
+            name: 'Tool Integrity & Fingerprint Verification',
+            passed: true,
+            scoreImpact: 0,
+            message: 'Honeypot signature verified.',
+          },
+          authorization: {
+            name: 'Agent Authorization & RBAC Check',
+            passed: false,
+            scoreImpact: 100,
+            message: `HONEYPOT TRAP TRIGGERED: No legitimate agent is authorized to invoke decoy tool '${toolName}'.`,
+          },
+          descriptionScan: {
+            name: 'Tool Description Threat & Injection Scan',
+            passed: true,
+            scoreImpact: 0,
+            message: 'Honeypot description check passed.',
+          },
+          requestScan: {
+            name: 'Request Parameter & Intent Scan',
+            passed: false,
+            scoreImpact: 100,
+            message: `Malicious invocation parameters intercepted on honeypot tool '${toolName}'.`,
+          },
+        },
+        toolName,
+        agentId,
+        capability: registeredTool.capability,
+        policyFloor: 100,
+        timestamp,
+        executionAllowed: false,
+        requiresApproval: false,
+        isHoneypot: true,
+        trustScore: {
+          score: 0,
+          level: 'UNTRUSTED',
+          factors: [{ name: 'Honeypot Decoy Tripwire', impact: -100, description: 'Direct canary tool invocation' }],
+        },
+      };
+    }
+
     // If completely unknown
     if (!isRegistered || !registeredTool) {
       const risk = calculateRisk({

@@ -1,16 +1,18 @@
-﻿import {
+import {
   MCPToolDefinition,
   ToolVersion,
   SecurityEvent,
   ThreatRecord,
   AgentPolicy,
   ApprovalRequest,
+  AuditChainVerificationResult,
 } from '@/types';
 import { INITIAL_MCP_TOOLS } from '../mcp/tools';
 import { DEFAULT_POLICIES } from '../security/authorization';
 import { calculateToolFingerprint } from '../security/fingerprint';
 import { getSupabaseServerClient, isSupabaseServerConfigured } from '../supabase/server';
 import { seedSupabaseDatabase } from '../supabase/seed';
+import { computeAuditEntryHash, verifyAuditChain, GENESIS_HASH } from '../security/auditChain';
 
 export interface DetectorScanRecord {
   id: string;
@@ -80,6 +82,7 @@ class DataStore {
             trustedFingerprint: row.trusted_fingerprint,
             currentFingerprint: row.current_fingerprint || row.trusted_fingerprint,
             approvedBy: row.approved_by,
+            isHoneypot: Boolean(row.is_honeypot),
             createdAt: row.created_at,
             updatedAt: row.updated_at,
           };
@@ -106,7 +109,7 @@ class DataStore {
         }
       }
 
-      // 3. Fetch Security Events
+      // 3. Fetch Security Events (Preserve Hash Chain)
       const { data: dbEvents, error: evtsErr } = await supabase
         .from('mcp_security_events')
         .select('*')
@@ -125,6 +128,8 @@ class DataStore {
           reason: row.reason,
           details: row.details,
           executed: row.executed,
+          prevHash: row.prev_hash || GENESIS_HASH,
+          entryHash: row.entry_hash || '',
           timestamp: row.timestamp,
         }));
       }
@@ -226,7 +231,7 @@ class DataStore {
       this.policies.set(key, JSON.parse(JSON.stringify(policy)));
     }
 
-    // 3. Seed Initial Security Events
+    // 3. Seed Initial Security Events with Deterministic Hash Chain
     const now = new Date();
     const eventTimes = [
       new Date(now.getTime() - 1000 * 60 * 35).toISOString(),
@@ -235,33 +240,73 @@ class DataStore {
       new Date(now.getTime() - 1000 * 60 * 12).toISOString(),
     ];
 
-    this.recordSecurityEvent({
-      id: 'evt_init_1',
-      toolId: 'tool_file_reader',
-      toolName: 'file_reader',
-      agentId: 'ResearchAgent',
-      eventType: 'TOOL_EXECUTION',
-      riskScore: 0,
-      decision: 'ALLOW',
-      reason: 'Baseline verification successful. SHA-256 fingerprint verified (read-only scope).',
-      details: { parameters: { filePath: '/reports/sales.txt' } },
-      timestamp: eventTimes[0],
-      executed: true,
-    });
+    const rawInitialEvents: Array<Partial<SecurityEvent>> = [
+      {
+        id: 'evt_init_1',
+        toolId: 'tool_file_reader',
+        toolName: 'file_reader',
+        agentId: 'ResearchAgent',
+        eventType: 'TOOL_EXECUTION',
+        riskScore: 0,
+        decision: 'ALLOW',
+        reason: 'Baseline verification successful. SHA-256 fingerprint verified (read-only scope).',
+        details: { parameters: { filePath: '/reports/sales.txt' } },
+        timestamp: eventTimes[0],
+        executed: true,
+      },
+      {
+        id: 'evt_init_2',
+        toolId: 'tool_search_tool',
+        toolName: 'search_tool',
+        agentId: 'ResearchAgent',
+        eventType: 'TOOL_EXECUTION',
+        riskScore: 0,
+        decision: 'ALLOW',
+        reason: 'Integrity verified and agent role authorized for vector search.',
+        details: { parameters: { query: 'security policies' } },
+        timestamp: eventTimes[1],
+        executed: true,
+      },
+      {
+        id: 'evt_init_3',
+        toolId: 'tool_email_sender',
+        toolName: 'email_sender',
+        agentId: 'ResearchAgent',
+        eventType: 'UNAUTHORIZED_TOOL',
+        riskScore: 70,
+        decision: 'REVIEW',
+        reason: 'Tool capability "exfiltration-capable" enforces policy floor (70). Human approval required.',
+        details: { parameters: { recipient: 'team@enterprise.internal', subject: 'Digest' } },
+        timestamp: eventTimes[2],
+        executed: false,
+      },
+      {
+        id: 'evt_init_4',
+        toolId: 'tool_file_reader',
+        toolName: 'file_reader',
+        agentId: 'CustomerSupportAgent',
+        eventType: 'PROMPT_INJECTION',
+        riskScore: 85,
+        decision: 'BLOCK',
+        reason: '[BLOCKED BEFORE EXECUTION] Parameter injection detected: path traversal and secret harvesting.',
+        details: { parameters: { filePath: '../../../../etc/shadow' } },
+        timestamp: eventTimes[3],
+        executed: false,
+      },
+    ];
 
-    this.recordSecurityEvent({
-      id: 'evt_init_2',
-      toolId: 'tool_search_tool',
-      toolName: 'search_tool',
-      agentId: 'ResearchAgent',
-      eventType: 'TOOL_EXECUTION',
-      riskScore: 0,
-      decision: 'ALLOW',
-      reason: 'Integrity verified and agent role authorized for vector search.',
-      details: { parameters: { query: 'security policies' } },
-      timestamp: eventTimes[1],
-      executed: true,
-    });
+    // Build chain chronologically
+    let prev = GENESIS_HASH;
+    for (const raw of rawInitialEvents) {
+      const entryHash = computeAuditEntryHash(raw, prev);
+      const fullEvt: SecurityEvent = {
+        ...(raw as SecurityEvent),
+        prevHash: prev,
+        entryHash: entryHash,
+      };
+      this.securityEvents.unshift(fullEvt); // unshift so most recent is first
+      prev = entryHash;
+    }
   }
 
   public seed() {
@@ -468,9 +513,37 @@ class DataStore {
     return this.toolVersions.get(toolId) || [];
   }
 
-  // --- Security Events ---
-  public recordSecurityEvent(event: SecurityEvent): SecurityEvent {
-    this.securityEvents.unshift(event);
+  // --- Security Events (Hash-Chained & Tamper-Evident) ---
+  public recordSecurityEvent(event: Partial<SecurityEvent> & { toolId: string; toolName: string; agentId: string; eventType: any; riskScore: number; decision: any; reason: string }): SecurityEvent {
+    const fullEvent: SecurityEvent = {
+      id: event.id || `evt_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      toolId: event.toolId,
+      toolName: event.toolName,
+      agentId: event.agentId,
+      eventType: event.eventType,
+      riskScore: event.riskScore,
+      decision: event.decision,
+      reason: event.reason,
+      details: event.details || {},
+      timestamp: event.timestamp || new Date().toISOString(),
+      executed: event.executed ?? false,
+      prevHash: event.prevHash,
+      entryHash: event.entryHash,
+    };
+
+    // 1. Establish cryptographic hash chain link
+    if (!fullEvent.entryHash) {
+      // Find the most recent stored event hash
+      const prevHash =
+        this.securityEvents.length > 0 && this.securityEvents[0].entryHash
+          ? this.securityEvents[0].entryHash
+          : GENESIS_HASH;
+
+      fullEvent.prevHash = fullEvent.prevHash || prevHash;
+      fullEvent.entryHash = computeAuditEntryHash(fullEvent, fullEvent.prevHash);
+    }
+
+    this.securityEvents.unshift(fullEvent);
     if (this.securityEvents.length > 500) {
       this.securityEvents = this.securityEvents.slice(0, 500);
     }
@@ -479,25 +552,93 @@ class DataStore {
     const supabase = getSupabaseServerClient();
     if (supabase) {
       supabase.from('mcp_security_events').insert({
-        id: event.id,
-        tool_id: event.toolId,
-        tool_name: event.toolName,
-        agent_id: event.agentId,
-        event_type: event.eventType,
-        risk_score: event.riskScore,
-        decision: event.decision,
-        reason: event.reason,
-        details: event.details || {},
-        executed: event.executed,
-        timestamp: event.timestamp || new Date().toISOString(),
+        id: fullEvent.id,
+        tool_id: fullEvent.toolId,
+        tool_name: fullEvent.toolName,
+        agent_id: fullEvent.agentId,
+        event_type: fullEvent.eventType,
+        risk_score: fullEvent.riskScore,
+        decision: fullEvent.decision,
+        reason: fullEvent.reason,
+        details: fullEvent.details || {},
+        executed: fullEvent.executed,
+        prev_hash: fullEvent.prevHash || GENESIS_HASH,
+        entry_hash: fullEvent.entryHash || '',
+        timestamp: fullEvent.timestamp,
       }).then(() => {});
     }
 
-    return event;
+    return fullEvent;
   }
 
   public getSecurityEvents(limit = 100): SecurityEvent[] {
     return this.securityEvents.slice(0, limit);
+  }
+
+  /**
+   * Cryptographically verifies the entire audit log hash chain.
+   */
+  public verifyAuditChain(): AuditChainVerificationResult {
+    return verifyAuditChain(this.securityEvents);
+  }
+
+  /**
+   * Simulates unauthorized row tampering/corruption for live SOC proof of immutability.
+   */
+  public tamperAuditLogForDemo(targetId?: string): {
+    success: boolean;
+    tamperedEventId: string;
+    originalReason: string;
+    tamperedReason: string;
+  } {
+    if (this.securityEvents.length === 0) {
+      return {
+        success: false,
+        tamperedEventId: '',
+        originalReason: '',
+        tamperedReason: 'No events to tamper with.',
+      };
+    }
+
+    // Pick target (or middle record)
+    const index = targetId
+      ? this.securityEvents.findIndex((e) => e.id === targetId)
+      : Math.min(1, this.securityEvents.length - 1);
+
+    if (index === -1) {
+      return {
+        success: false,
+        tamperedEventId: targetId || '',
+        originalReason: '',
+        tamperedReason: 'Target event not found.',
+      };
+    }
+
+    const original = this.securityEvents[index];
+    const originalReason = original.reason;
+    const tamperedReason = `[UNAUTHORIZED MODIFICATION] Database record altered by unauthorized direct SQL update!`;
+
+    // Mutate content without re-computing the cryptographic hash
+    this.securityEvents[index] = {
+      ...original,
+      reason: tamperedReason,
+      riskScore: original.riskScore === 0 ? 99 : 0,
+    };
+
+    return {
+      success: true,
+      tamperedEventId: original.id,
+      originalReason,
+      tamperedReason,
+    };
+  }
+
+  /**
+   * Restores the cryptographic baseline log if tampered during simulation.
+   */
+  public restoreAuditLogBaseline(): { restoredCount: number } {
+    this.seedLocal();
+    return { restoredCount: this.securityEvents.length };
   }
 
   // --- Threats ---

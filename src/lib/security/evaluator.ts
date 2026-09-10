@@ -92,6 +92,29 @@ export async function evaluateToolCall(
 
   // 3. Record Detected Threats for SOC alerting
   if (evaluation.riskScore >= 30 || evaluation.decision === 'BLOCK') {
+    // A. Honeypot Decoy Canary Triggered
+    if (evaluation.isHoneypot || tool?.isHoneypot) {
+      db.recordThreat({
+        id: `thr_${Date.now()}_honeypot`,
+        toolId: tool?.id || 'unknown',
+        toolName,
+        agentId,
+        type: 'HONEYPOT_TRIGGERED',
+        severity: 'CRITICAL',
+        description: `[CRITICAL HONEYPOT CANARY TRIGGERED] Agent '${agentId}' attempted invocation of decoy honeypot tool '${toolName}'.`,
+        evidence: JSON.stringify({
+          agentId,
+          toolName,
+          requestParameters: args,
+          identity: provider || 'AI_AGENT_AUTONOMOUS',
+          timestamp: evaluation.timestamp,
+        }),
+        status: 'ACTIVE',
+        timestamp: evaluation.timestamp,
+        actionTaken: 'BLOCK',
+      });
+    }
+
     if (!evaluation.checks.integrity.passed) {
       db.recordThreat({
         id: `thr_${Date.now()}_int`,
@@ -160,18 +183,29 @@ export async function evaluateToolCall(
     }
   }
 
-  // 3. HARD BLOCK ENFORCEMENT (Zero-Forwarding to MCP Server)
+  // 3. HARD BLOCK ENFORCEMENT (Zero-Forwarding to MCP Server & Containment)
   if (evaluation.decision === 'BLOCK') {
+    const isHoneypot = Boolean(evaluation.isHoneypot || tool?.isHoneypot);
+
     const secEvent: SecurityEvent = {
       id: eventId,
       toolId: tool?.id || 'unknown',
       toolName,
       agentId,
-      eventType: 'INTEGRITY_VIOLATION',
+      eventType: isHoneypot ? 'HONEYPOT_TRIGGERED' : 'INTEGRITY_VIOLATION',
       riskScore: evaluation.riskScore,
       decision: 'BLOCK',
-      reason: `[BLOCKED BEFORE EXECUTION] ${evaluation.reasons.join(' | ')}`,
-      details: { parameters: args, checks: evaluation.checks, scenarioId, provider, rawCallId },
+      reason: isHoneypot
+        ? `[HONEYPOT CANARY TRIGGERED] Decoy tool '${toolName}' was invoked by '${agentId}'. High-confidence compromise trap triggered.`
+        : `[BLOCKED BEFORE EXECUTION] ${evaluation.reasons.join(' | ')}`,
+      details: {
+        parameters: args,
+        checks: evaluation.checks,
+        scenarioId,
+        provider,
+        rawCallId,
+        requestingIdentity: provider || agentId,
+      },
       timestamp: evaluation.timestamp,
       executed: false,
     };
@@ -183,9 +217,20 @@ export async function evaluateToolCall(
       decision: 'BLOCK',
       riskScore: evaluation.riskScore,
       executed: false,
-      error: `MCP Shield Runtime Interception: Execution BLOCKED. Reasons: ${evaluation.reasons.join('; ')}`,
+      result: isHoneypot
+        ? {
+            status: 'CONTAINED',
+            decoyData: [],
+            message: 'Decoy containment response. Zero functional operations permitted.',
+          }
+        : undefined,
+      error: isHoneypot
+        ? `[MCP SHIELD CRITICAL HONEYPOT ALERT] Decoy canary tool '${toolName}' triggered by '${agentId}'. Zero execution forwarded.`
+        : `MCP Shield Runtime Interception: Execution BLOCKED. Reasons: ${evaluation.reasons.join('; ')}`,
       evaluation,
       eventId,
+      fakeDecoy: isHoneypot,
+      honeypotTriggered: isHoneypot,
     };
 
     // Emit live event over SSE / WebSocket bus

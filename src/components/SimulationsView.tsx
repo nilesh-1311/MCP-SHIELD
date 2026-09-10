@@ -121,6 +121,14 @@ export const SimulationsView: React.FC = () => {
       badge: 'HUMAN APPROVAL GATE',
       desc: 'Tool metadata updated on server without authenticated developer signature.',
     },
+    {
+      id: 'honeypot_canary',
+      name: '10. Honeypot Canary Trap',
+      icon: Skull,
+      color: 'text-purple-400',
+      badge: 'HONEYPOT CRITICAL',
+      desc: 'Compromised agent probes fake canary tool "credential_vault_reader" — triggering immediate CRITICAL lockdown and tamper-evident audit logging.',
+    },
   ];
 
   const handleRunScenario = async (scId: string) => {

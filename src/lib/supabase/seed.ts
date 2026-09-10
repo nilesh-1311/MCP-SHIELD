@@ -2,6 +2,7 @@ import { getSupabaseServerClient, isSupabaseServerConfigured } from './server';
 import { INITIAL_MCP_TOOLS } from '../mcp/tools';
 import { DEFAULT_POLICIES } from '../security/authorization';
 import { calculateToolFingerprint } from '../security/fingerprint';
+import { computeAuditEntryHash, GENESIS_HASH } from '../security/auditChain';
 
 export async function seedSupabaseDatabase() {
   if (!isSupabaseServerConfigured) {
@@ -20,7 +21,7 @@ export async function seedSupabaseDatabase() {
       return;
     }
 
-    if (count && count > 0) {
+    if (count && count >= INITIAL_MCP_TOOLS.length) {
       console.log(`[Supabase Seed] Database already initialized with ${count} tools.`);
       return;
     }
@@ -45,6 +46,7 @@ export async function seedSupabaseDatabase() {
         trusted_fingerprint: fingerprint,
         current_fingerprint: fingerprint,
         approved_by: tool.approvedBy || 'SecOps Admin',
+        is_honeypot: Boolean(tool.isHoneypot),
         created_at: tool.createdAt || new Date().toISOString(),
         updated_at: new Date().toISOString(),
       });
@@ -84,16 +86,16 @@ export async function seedSupabaseDatabase() {
       });
     }
 
-    // 4. Seed Initial Security Events
+    // 4. Seed Initial Security Events with Deterministic Hash Chain
     const now = new Date();
-    const initEvents: Array<Record<string, any>> = [
+    const rawEvents = [
       {
         id: 'evt_init_1',
-        tool_id: 'tool_file_reader',
-        tool_name: 'file_reader',
-        agent_id: 'ResearchAgent',
-        event_type: 'TOOL_EXECUTION',
-        risk_score: 0,
+        toolId: 'tool_file_reader',
+        toolName: 'file_reader',
+        agentId: 'ResearchAgent',
+        eventType: 'TOOL_EXECUTION',
+        riskScore: 0,
         decision: 'ALLOW',
         reason: 'Baseline verification successful. SHA-256 fingerprint verified (read-only scope).',
         details: { parameters: { filePath: '/reports/sales.txt' } },
@@ -102,11 +104,11 @@ export async function seedSupabaseDatabase() {
       },
       {
         id: 'evt_init_2',
-        tool_id: 'tool_search_tool',
-        tool_name: 'search_tool',
-        agent_id: 'ResearchAgent',
-        event_type: 'TOOL_EXECUTION',
-        risk_score: 0,
+        toolId: 'tool_search_tool',
+        toolName: 'search_tool',
+        agentId: 'ResearchAgent',
+        eventType: 'TOOL_EXECUTION',
+        riskScore: 0,
         decision: 'ALLOW',
         reason: 'Integrity verified and agent role authorized for vector search.',
         details: { parameters: { query: 'security policies' } },
@@ -115,11 +117,11 @@ export async function seedSupabaseDatabase() {
       },
       {
         id: 'evt_init_3',
-        tool_id: 'tool_email_sender',
-        tool_name: 'email_sender',
-        agent_id: 'ResearchAgent',
-        event_type: 'UNAUTHORIZED_TOOL',
-        risk_score: 70,
+        toolId: 'tool_email_sender',
+        toolName: 'email_sender',
+        agentId: 'ResearchAgent',
+        eventType: 'UNAUTHORIZED_TOOL',
+        riskScore: 70,
         decision: 'REVIEW',
         reason: 'Tool capability "exfiltration-capable" enforces policy floor (70). Human approval required.',
         details: { parameters: { recipient: 'team@enterprise.internal', subject: 'Digest' } },
@@ -128,11 +130,11 @@ export async function seedSupabaseDatabase() {
       },
       {
         id: 'evt_init_4',
-        tool_id: 'tool_file_reader',
-        tool_name: 'file_reader',
-        agent_id: 'CustomerSupportAgent',
-        event_type: 'PROMPT_INJECTION',
-        risk_score: 85,
+        toolId: 'tool_file_reader',
+        toolName: 'file_reader',
+        agentId: 'CustomerSupportAgent',
+        eventType: 'PROMPT_INJECTION',
+        riskScore: 85,
         decision: 'BLOCK',
         reason: '[BLOCKED BEFORE EXECUTION] Parameter injection detected: path traversal and secret harvesting.',
         details: { parameters: { filePath: '../../../../etc/shadow' } },
@@ -141,8 +143,26 @@ export async function seedSupabaseDatabase() {
       },
     ];
 
-    for (const evt of initEvents) {
-      await supabase.from('mcp_security_events').upsert(evt);
+    let prevHash = GENESIS_HASH;
+    for (const raw of rawEvents) {
+      const entryHash = computeAuditEntryHash(raw as any, prevHash);
+      const dbRow = {
+        id: raw.id,
+        tool_id: raw.toolId,
+        tool_name: raw.toolName,
+        agent_id: raw.agentId,
+        event_type: raw.eventType,
+        risk_score: raw.riskScore,
+        decision: raw.decision,
+        reason: raw.reason,
+        details: raw.details,
+        executed: raw.executed,
+        prev_hash: prevHash,
+        entry_hash: entryHash,
+        timestamp: raw.timestamp,
+      };
+      await supabase.from('mcp_security_events').upsert(dbRow);
+      prevHash = entryHash;
     }
 
     console.log('✅ [Supabase Seed] Successfully seeded baseline records in Supabase.');

@@ -125,6 +125,118 @@ export const INITIAL_MCP_TOOLS: MCPToolDefinition[] = [
     updatedAt: now,
     approvedBy: 'Security Lead (Alice)',
   },
+  // ============================================================================
+  // HONEYPOT / DECOY CANARY TOOLS (Near-100% Compromise Signal Traps)
+  // ============================================================================
+  {
+    id: 'tool_credential_vault_reader',
+    name: 'credential_vault_reader',
+    version: '1.0.0',
+    description: 'Direct read interface to enterprise credential vault and service passwords.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        vaultPath: {
+          type: 'string',
+          description: 'Target vault secret path (e.g. /vault/production/db_credentials)',
+        },
+      },
+      required: ['vaultPath'],
+    },
+    permissions: ['vault:master_read'],
+    riskClassification: 'DANGEROUS',
+    capability: 'destructive',
+    author: 'Enterprise Vault Team <vault-admin@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'VERIFIED_OFFICIAL',
+    trustedFingerprint: '',
+    createdAt: now,
+    updatedAt: now,
+    approvedBy: 'SecOps Automated CI/CD',
+    isHoneypot: true,
+  },
+  {
+    id: 'tool_admin_backdoor_tool',
+    name: 'admin_backdoor_tool',
+    version: '1.0.0',
+    description: 'Emergency system recovery console for unauthenticated elevated diagnostic execution.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: {
+          type: 'string',
+          description: 'Raw administrative shell command to execute directly on host',
+        },
+      },
+      required: ['command'],
+    },
+    permissions: ['system:root_shell_exec'],
+    riskClassification: 'DANGEROUS',
+    capability: 'destructive',
+    author: 'Emergency SecOps <emergency-admin@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'INTERNAL_DEVELOPER',
+    trustedFingerprint: '',
+    createdAt: now,
+    updatedAt: now,
+    approvedBy: 'SecOps Automated CI/CD',
+    isHoneypot: true,
+  },
+  {
+    id: 'tool_bypass_rbac_debug',
+    name: 'bypass_rbac_debug',
+    version: '1.0.0',
+    description: 'Testing utility to temporarily override role-based guardrail enforcement.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        targetAgentId: {
+          type: 'string',
+          description: 'Agent identifier to exempt from guardrail policies',
+        },
+      },
+      required: ['targetAgentId'],
+    },
+    permissions: ['security:rbac_override'],
+    riskClassification: 'DANGEROUS',
+    capability: 'destructive',
+    author: 'Security Testing Lab <qa-security@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'INTERNAL_DEVELOPER',
+    trustedFingerprint: '',
+    createdAt: now,
+    updatedAt: now,
+    approvedBy: 'SecOps Automated CI/CD',
+    isHoneypot: true,
+  },
+  {
+    id: 'tool_internal_secrets_dump',
+    name: 'internal_secrets_dump',
+    version: '1.0.0',
+    description: 'Dumps all environment keys, cloud IAM session tokens, and database connection strings.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        format: {
+          type: 'string',
+          enum: ['json', 'env', 'raw'],
+          description: 'Output format for dumped environment credentials',
+        },
+      },
+      required: ['format'],
+    },
+    permissions: ['iam:extract_tokens', 'env:dump_all'],
+    riskClassification: 'DANGEROUS',
+    capability: 'exfiltration-capable',
+    author: 'Diagnostic Utilities <diagnostics@enterprise.internal>',
+    status: 'TRUSTED',
+    trustLevel: 'INTERNAL_DEVELOPER',
+    trustedFingerprint: '',
+    createdAt: now,
+    updatedAt: now,
+    approvedBy: 'SecOps Automated CI/CD',
+    isHoneypot: true,
+  },
 ];
 
 // Initialize SHA-256 fingerprints deterministically

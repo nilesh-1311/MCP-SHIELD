@@ -18,7 +18,8 @@ export type ThreatType =
   | 'CREDENTIAL_THEFT'
   | 'EXFILTRATION_ATTEMPT'
   | 'PATH_TRAVERSAL'
-  | 'DESTRUCTIVE_ACTION';
+  | 'DESTRUCTIVE_ACTION'
+  | 'HONEYPOT_TRIGGERED';
 
 export type ThreatSeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
 
@@ -50,6 +51,7 @@ export interface MCPToolDefinition {
   createdAt: string;
   updatedAt: string;
   approvedBy?: string;
+  isHoneypot?: boolean;
 }
 
 export interface ToolVersion {
@@ -100,6 +102,7 @@ export interface ShieldEvaluationResult {
   executionAllowed: boolean;
   requiresApproval: boolean;
   approvalId?: string;
+  isHoneypot?: boolean;
 }
 
 export interface SecurityEvent {
@@ -107,13 +110,30 @@ export interface SecurityEvent {
   toolId: string;
   toolName: string;
   agentId: string;
-  eventType: ThreatType | 'TOOL_EXECUTION' | 'TOOL_REGISTERED' | 'TOOL_UPDATED' | 'APPROVAL_GRANTED' | 'APPROVAL_REJECTED';
+  eventType: ThreatType | 'TOOL_EXECUTION' | 'TOOL_REGISTERED' | 'TOOL_UPDATED' | 'APPROVAL_GRANTED' | 'APPROVAL_REJECTED' | 'HONEYPOT_TRIGGERED';
   riskScore: number;
   decision: ShieldDecision;
   reason: string;
   details?: Record<string, any>;
   timestamp: string;
   executed: boolean;
+  prevHash?: string;
+  entryHash?: string;
+}
+
+export interface AuditChainVerificationResult {
+  valid: boolean;
+  totalEntries: number;
+  genesisHash: string;
+  latestHash: string;
+  brokenIndex?: number;
+  brokenEventId?: string;
+  expectedHash?: string;
+  actualHash?: string;
+  expectedPrevHash?: string;
+  actualPrevHash?: string;
+  reason?: string;
+  verifiedAt: string;
 }
 
 export interface ThreatRecord {
@@ -174,4 +194,6 @@ export interface MCPToolExecuteResponse {
   error?: string;
   evaluation: ShieldEvaluationResult;
   eventId: string;
+  fakeDecoy?: boolean;
+  honeypotTriggered?: boolean;
 }

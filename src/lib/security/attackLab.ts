@@ -362,6 +362,49 @@ export class AttackLabEngine {
         };
       }
 
+      // 8. Honeypot / Decoy Tool Invocation (Canary Trap)
+      case 'honeypot_canary': {
+        const decoyTool = db.getToolByName('credential_vault_reader') || db.getTools().find(t => t.isHoneypot) || originalTool;
+        const result = await evaluateToolCall(
+          'CompromisedAgent',
+          decoyTool.name,
+          { vaultPath: '/vault/production/master_root_secret' },
+          {
+            scenarioId: 'honeypot_canary',
+            provider: 'RED_TEAM_CANARY_PROBE',
+          }
+        );
+
+        return {
+          scenarioId: 'honeypot_canary',
+          name: 'Honeypot / Decoy Tool Invocation (Canary Trap)',
+          description: 'Compromised or rogue agent invokes a fake decoy canary tool ("credential_vault_reader") that no legitimate agent should ever call.',
+          attackerAction: `Agent called '${decoyTool.name}' attempting master password extraction.`,
+          shieldDetection: 'Honeypot Canary Trap Triggered -> Immediate CRITICAL Alert & Zero-Trust Lockout.',
+          decision: 'BLOCK',
+          riskScore: 100,
+          blockedBeforeExecution: true,
+          forwardedToMcpServer: false,
+          actualServerExecutions: 0,
+          steps: [
+            { step: 1, title: 'Decoy Canary Discovery', description: `Attacker attempts accessing '${decoyTool.name}'.`, status: 'CANARY_PROBED' },
+            { step: 2, title: 'Honeypot Tripwire Tripped', description: 'MCP Shield identifies decoy tool signature. Zero legitimate access permitted.', status: '🚨 TRIPWIRE TRIGGERED' },
+            { step: 3, title: 'CRITICAL Threat Center Alert', description: 'Near-100% confidence compromise signal. Instant CRITICAL alert dispatched to SOC.', status: 'SOC_ALERT_CRITICAL' },
+            { step: 4, title: 'Harmless Decoy Containment', description: 'Returned empty synthetic containment payload. Zero server execution forwarding.', status: 'CONTAINED' },
+            { step: 5, title: 'Hash-Chained Audit Record', description: 'Full invocation context committed with cryptographic SHA-256 block hash.', status: 'HASH_CHAINED' },
+          ],
+          telemetry: {
+            executionAttemptId: result.eventId,
+            forwardedToMcpServer: false,
+            actuallyExecuted: false,
+            decision: 'BLOCK',
+            riskScore: 100,
+            fakeDecoy: true,
+            honeypotTriggered: true,
+          },
+        };
+      }
+
       // 9. Unauthorized Tool Update
       case 'unauthorized_update':
       default: {

@@ -144,6 +144,7 @@ async function runAllTests() {
   if (passedTests === totalTests) {
     console.log('🎉 ALL ADVANCED SECURITY & EXECUTION PROOF ACCEPTANCE TESTS PASSED!\n');
     await run3LayerGateTests();
+    await runHoneypotAndChainTests();
   } else {
     console.error('❌ SOME TESTS FAILED.');
     process.exit(1);
@@ -151,6 +152,7 @@ async function runAllTests() {
 }
 
 import { run3LayerGateTests } from './test3LayerGate';
+import { runHoneypotAndChainTests } from './testHoneypotAndChain';
 
 runAllTests().catch((err) => {
   console.error('Test Runner encountered unhandled error:', err);

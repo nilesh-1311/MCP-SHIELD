@@ -1,4 +1,4 @@
-﻿-- ==============================================================================
+-- ==============================================================================
 -- MCP SHIELD — PRODUCTION SUPABASE (POSTGRESQL) SCHEMA
 -- ==============================================================================
 
@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
     trusted_fingerprint TEXT NOT NULL,
     current_fingerprint TEXT,
     approved_by TEXT,
+    is_honeypot BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -56,7 +57,7 @@ CREATE TABLE IF NOT EXISTS mcp_agent_policies (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- 5. Security Audit Log & Real-Time Events Table
+-- 5. Security Audit Log & Real-Time Events Table (Tamper-Evident Hash Chain)
 CREATE TABLE IF NOT EXISTS mcp_security_events (
     id TEXT PRIMARY KEY,
     tool_id TEXT NOT NULL,
@@ -68,6 +69,8 @@ CREATE TABLE IF NOT EXISTS mcp_security_events (
     reason TEXT NOT NULL,
     details JSONB NOT NULL DEFAULT '{}'::jsonb,
     executed BOOLEAN NOT NULL DEFAULT FALSE,
+    prev_hash TEXT NOT NULL DEFAULT '0000000000000000000000000000000000000000000000000000000000000000',
+    entry_hash TEXT,
     timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
