@@ -35,9 +35,9 @@ class SSEHub {
     });
 
     if (this.listeners.size === 1 && typeof window !== 'undefined') {
-      // Connect with a small delay so page assets and initial bundle loads first
+      // Connect after window has finished initial paint
       if (this.connectDelayTimer) clearTimeout(this.connectDelayTimer);
-      this.connectDelayTimer = setTimeout(() => this.connect(), 200);
+      this.connectDelayTimer = setTimeout(() => this.connect(), 800);
     }
 
     return () => {
@@ -90,7 +90,7 @@ class SSEHub {
         this.isConnected = false;
         this.disconnect();
         if (this.listeners.size > 0) {
-          this.reconnectTimer = setTimeout(() => this.connect(), 4000);
+          this.reconnectTimer = setTimeout(() => this.connect(), 5000);
         }
         this.notify();
       };

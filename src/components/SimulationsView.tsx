@@ -36,6 +36,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useToast } from './ToastContext';
 import { useShieldEvents } from '@/lib/hooks/useShieldEvents';
 import { RedTeamSimulationResult } from '@/lib/security/redTeamAgent';
+import { Card3D } from './Card3D';
 
 export const SimulationsView: React.FC = () => {
   const { showToast } = useToast();

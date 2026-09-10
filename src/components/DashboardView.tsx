@@ -47,6 +47,7 @@ import {
 import { MCPToolDefinition, SecurityEvent, ThreatRecord } from '@/types';
 import { AnimatedCounter } from './AnimatedCounter';
 import { ShieldCore } from './ShieldCore';
+import { Card3D } from './Card3D';
 
 interface DashboardViewProps {
   metrics: {
@@ -239,159 +240,167 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* 2. ASYMMETRIC SECTION: Real-Time Trust & Zero-Drift Telemetry */}
       <motion.section variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Left: Oversized Trust Score Meter (5 cols) */}
-        <div className="lg:col-span-5 bg-[#0b1324] border border-[#1e2d4d] rounded-3xl p-6 sm:p-8 flex flex-col justify-between shadow-xl">
-          <div>
-            <div className="flex items-center justify-between mb-4">
-              <span className="text-xs font-bold text-slate-400 uppercase font-mono tracking-wider">
-                CRYPTOGRAPHIC TRUST INDEX
-              </span>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                VERIFIED SHA-256
-              </span>
-            </div>
+        <div className="lg:col-span-5 flex">
+          <Card3D glowColor="emerald" depth={10} className="h-full">
+            <div className="h-full bg-[#0b1324]/90 backdrop-blur-xl border border-[#1e2d4d] rounded-3xl p-6 sm:p-8 flex flex-col justify-between shadow-2xl">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs font-bold text-slate-400 uppercase font-mono tracking-wider">
+                    CRYPTOGRAPHIC TRUST INDEX
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
+                    VERIFIED SHA-256
+                  </span>
+                </div>
 
-            <div className="flex items-baseline space-x-2">
-              <span className="text-5xl sm:text-6xl font-black font-mono text-white tracking-tight">
-                <AnimatedCounter value={metrics.securityScore} />
-              </span>
-              <span className="text-xl font-mono text-slate-500 font-bold">/ 100</span>
-            </div>
-            <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-              Continuous validation across canonical tool hashes, runtime permissions, and prompt injection filters.
-            </p>
-          </div>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-5xl sm:text-6xl font-black font-mono text-white tracking-tight">
+                    <AnimatedCounter value={metrics.securityScore} />
+                  </span>
+                  <span className="text-xl font-mono text-slate-500 font-bold">/ 100</span>
+                </div>
+                <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+                  Continuous validation across canonical tool hashes, runtime permissions, and prompt injection filters.
+                </p>
+              </div>
 
-          {/* Real-time Sub-Score Bars */}
-          <div className="space-y-3 pt-6 border-t border-[#182642]">
-            <div>
-              <div className="flex justify-between text-xs font-mono mb-1">
-                <span className="text-slate-300 font-semibold">Integrity Hash Verification</span>
-                <span className="text-emerald-400 font-bold">100%</span>
-              </div>
-              <div className="w-full bg-[#070c18] h-2 rounded-full overflow-hidden border border-[#182642]">
-                <div className="h-full bg-emerald-500 w-full rounded-full" />
-              </div>
-            </div>
+              {/* Real-time Sub-Score Bars */}
+              <div className="space-y-3 pt-6 border-t border-[#182642]">
+                <div>
+                  <div className="flex justify-between text-xs font-mono mb-1">
+                    <span className="text-slate-300 font-semibold">Integrity Hash Verification</span>
+                    <span className="text-emerald-400 font-bold">100%</span>
+                  </div>
+                  <div className="w-full bg-[#070c18] h-2 rounded-full overflow-hidden border border-[#182642]">
+                    <div className="h-full bg-emerald-500 w-full rounded-full" />
+                  </div>
+                </div>
 
-            <div>
-              <div className="flex justify-between text-xs font-mono mb-1">
-                <span className="text-slate-300 font-semibold">Agent Authorization & RBAC</span>
-                <span className="text-emerald-400 font-bold">100%</span>
-              </div>
-              <div className="w-full bg-[#070c18] h-2 rounded-full overflow-hidden border border-[#182642]">
-                <div className="h-full bg-emerald-500 w-full rounded-full" />
-              </div>
-            </div>
+                <div>
+                  <div className="flex justify-between text-xs font-mono mb-1">
+                    <span className="text-slate-300 font-semibold">Agent Authorization & RBAC</span>
+                    <span className="text-emerald-400 font-bold">100%</span>
+                  </div>
+                  <div className="w-full bg-[#070c18] h-2 rounded-full overflow-hidden border border-[#182642]">
+                    <div className="h-full bg-emerald-500 w-full rounded-full" />
+                  </div>
+                </div>
 
-            <div>
-              <div className="flex justify-between text-xs font-mono mb-1">
-                <span className="text-slate-300 font-semibold">Behavior & Output Quarantine</span>
-                <span
-                  className={metrics.threatsDetected > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}
-                >
-                  {metrics.threatsDetected > 0 ? '78%' : '98%'}
-                </span>
-              </div>
-              <div className="w-full bg-[#070c18] h-2 rounded-full overflow-hidden border border-[#182642]">
-                <div
-                  className={`h-full rounded-full transition-all duration-700 ${
-                    metrics.threatsDetected > 0 ? 'bg-rose-500 w-[78%]' : 'bg-emerald-500 w-[98%]'
-                  }`}
-                />
+                <div>
+                  <div className="flex justify-between text-xs font-mono mb-1">
+                    <span className="text-slate-300 font-semibold">Behavior & Output Quarantine</span>
+                    <span
+                      className={metrics.threatsDetected > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}
+                    >
+                      {metrics.threatsDetected > 0 ? '78%' : '98%'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-[#070c18] h-2 rounded-full overflow-hidden border border-[#182642]">
+                    <div
+                      className={`h-full rounded-full transition-all duration-700 ${
+                        metrics.threatsDetected > 0 ? 'bg-rose-500 w-[78%]' : 'bg-emerald-500 w-[98%]'
+                      }`}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          </Card3D>
         </div>
 
         {/* Right: Key SOC Operational Metrics (7 cols) */}
         <div className="lg:col-span-7 grid grid-cols-2 gap-4">
           {/* Card 1: Protected Tools */}
-          <motion.div
-            whileHover={{ y: -3 }}
-            onClick={() => onNavigate('registry')}
-            className="bg-[#0b1324] border border-[#1a2947] hover:border-[#2b416e] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-xl cursor-pointer transition-colors"
-          >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
-              <span>PROTECTED TOOLS</span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-950/70 border border-emerald-500/30 flex items-center justify-center">
-                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+          <Card3D glowColor="emerald" depth={8}>
+            <div
+              onClick={() => onNavigate('registry')}
+              className="bg-[#0b1324]/90 backdrop-blur-xl border border-[#1a2947] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl cursor-pointer h-full"
+            >
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
+                <span>PROTECTED TOOLS</span>
+                <div className="w-8 h-8 rounded-xl bg-emerald-950/70 border border-emerald-500/30 flex items-center justify-center">
+                  <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="text-4xl font-extrabold text-white font-mono">
+                  <AnimatedCounter value={metrics.protectedTools} />
+                </div>
+                <div className="text-xs text-emerald-400 font-medium mt-1 font-mono">
+                  SHA-256 Registered Baselines
+                </div>
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-4xl font-extrabold text-white font-mono">
-                <AnimatedCounter value={metrics.protectedTools} />
-              </div>
-              <div className="text-xs text-emerald-400 font-medium mt-1 font-mono">
-                SHA-256 Registered Baselines
-              </div>
-            </div>
-          </motion.div>
+          </Card3D>
 
           {/* Card 2: Intercepted Threats */}
-          <motion.div
-            whileHover={{ y: -3 }}
-            onClick={() => onNavigate('threats')}
-            className="bg-[#0b1324] border border-[#1a2947] hover:border-[#2b416e] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-xl cursor-pointer transition-colors"
-          >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
-              <span>ACTIVE THREATS</span>
-              <div className="w-8 h-8 rounded-xl bg-rose-950/70 border border-rose-500/30 flex items-center justify-center">
-                <ShieldAlert className="w-4 h-4 text-rose-400" />
+          <Card3D glowColor="rose" depth={8}>
+            <div
+              onClick={() => onNavigate('threats')}
+              className="bg-[#0b1324]/90 backdrop-blur-xl border border-[#1a2947] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl cursor-pointer h-full"
+            >
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
+                <span>ACTIVE THREATS</span>
+                <div className="w-8 h-8 rounded-xl bg-rose-950/70 border border-rose-500/30 flex items-center justify-center">
+                  <ShieldAlert className="w-4 h-4 text-rose-400" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="text-4xl font-extrabold text-rose-400 font-mono">
+                  <AnimatedCounter value={metrics.threatsDetected} />
+                </div>
+                <div className="text-xs text-rose-400 font-medium mt-1 font-mono">
+                  Zero Undetected Drifts
+                </div>
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-4xl font-extrabold text-rose-400 font-mono">
-                <AnimatedCounter value={metrics.threatsDetected} />
-              </div>
-              <div className="text-xs text-rose-400 font-medium mt-1 font-mono">
-                Zero Undetected Drifts
-              </div>
-            </div>
-          </motion.div>
+          </Card3D>
 
           {/* Card 3: Blocked Actions */}
-          <motion.div
-            whileHover={{ y: -3 }}
-            onClick={() => onNavigate('audit')}
-            className="bg-[#0b1324] border border-[#1a2947] hover:border-[#2b416e] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-xl cursor-pointer transition-colors"
-          >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
-              <span>BLOCKED DISPATCHES</span>
-              <div className="w-8 h-8 rounded-xl bg-rose-950/70 border border-rose-500/30 flex items-center justify-center">
-                <ShieldX className="w-4 h-4 text-rose-500" />
+          <Card3D glowColor="rose" depth={8}>
+            <div
+              onClick={() => onNavigate('audit')}
+              className="bg-[#0b1324]/90 backdrop-blur-xl border border-[#1a2947] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl cursor-pointer h-full"
+            >
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
+                <span>BLOCKED DISPATCHES</span>
+                <div className="w-8 h-8 rounded-xl bg-rose-950/70 border border-rose-500/30 flex items-center justify-center">
+                  <ShieldX className="w-4 h-4 text-rose-500" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="text-4xl font-extrabold text-white font-mono">
+                  <AnimatedCounter value={metrics.blockedActions} />
+                </div>
+                <div className="text-xs text-slate-400 font-medium mt-1 font-mono">
+                  Prevented Before Execution
+                </div>
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-4xl font-extrabold text-white font-mono">
-                <AnimatedCounter value={metrics.blockedActions} />
-              </div>
-              <div className="text-xs text-slate-400 font-medium mt-1 font-mono">
-                Prevented Before Execution
-              </div>
-            </div>
-          </motion.div>
+          </Card3D>
 
           {/* Card 4: Pending Approvals */}
-          <motion.div
-            whileHover={{ y: -3 }}
-            onClick={() => onNavigate('policies')}
-            className="bg-[#0b1324] border border-[#1a2947] hover:border-[#2b416e] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-xl cursor-pointer transition-colors"
-          >
-            <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
-              <span>PENDING REVIEWS</span>
-              <div className="w-8 h-8 rounded-xl bg-amber-950/70 border border-amber-500/30 flex items-center justify-center">
-                <Clock className="w-4 h-4 text-amber-400" />
+          <Card3D glowColor="amber" depth={8}>
+            <div
+              onClick={() => onNavigate('policies')}
+              className="bg-[#0b1324]/90 backdrop-blur-xl border border-[#1a2947] rounded-3xl p-5 sm:p-6 flex flex-col justify-between shadow-2xl cursor-pointer h-full"
+            >
+              <div className="flex items-center justify-between text-slate-400 text-xs font-semibold font-mono">
+                <span>PENDING REVIEWS</span>
+                <div className="w-8 h-8 rounded-xl bg-amber-950/70 border border-amber-500/30 flex items-center justify-center">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                </div>
+              </div>
+              <div className="mt-4">
+                <div className="text-4xl font-extrabold text-amber-400 font-mono">
+                  <AnimatedCounter value={metrics.pendingApprovals} />
+                </div>
+                <div className="text-xs text-amber-400 font-medium mt-1 font-mono">
+                  Human-in-the-Loop Gate
+                </div>
               </div>
             </div>
-            <div className="mt-4">
-              <div className="text-4xl font-extrabold text-amber-400 font-mono">
-                <AnimatedCounter value={metrics.pendingApprovals} />
-              </div>
-              <div className="text-xs text-amber-400 font-medium mt-1 font-mono">
-                Human-in-the-Loop Gate
-              </div>
-            </div>
-          </motion.div>
+          </Card3D>
         </div>
       </motion.section>
 
@@ -478,37 +487,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {mcpServers.map((srv) => (
-            <motion.div
-              key={srv.id}
-              whileHover={{ y: -3 }}
-              onClick={() => setSelectedServerNode(srv.id)}
-              className={`p-5 bg-[#070c18] border rounded-2xl flex flex-col justify-between transition-all cursor-pointer ${
-                selectedServerNode === srv.id
-                  ? 'border-purple-500/70 shadow-lg shadow-purple-950/40 ring-1 ring-purple-500/30'
-                  : 'border-[#182642] hover:border-[#2a3f6a]'
-              }`}
-            >
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-white font-mono">{srv.name}</span>
-                  <span className="px-2 py-0.5 text-[9px] font-bold font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800 rounded">
-                    {srv.status}
-                  </span>
+            <Card3D key={srv.id} glowColor="indigo" depth={6}>
+              <div
+                onClick={() => setSelectedServerNode(srv.id)}
+                className={`p-5 bg-[#070c18]/95 backdrop-blur-xl border rounded-2xl flex flex-col justify-between transition-all cursor-pointer h-full ${
+                  selectedServerNode === srv.id
+                    ? 'border-purple-500/80 shadow-lg shadow-purple-950/50 ring-1 ring-purple-500/40'
+                    : 'border-[#182642] hover:border-[#2a3f6a]'
+                }`}
+              >
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-white font-mono">{srv.name}</span>
+                    <span className="px-2 py-0.5 text-[9px] font-bold font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800 rounded">
+                      {srv.status}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-mono text-slate-400 truncate">{srv.endpoint}</p>
+                  <div className="text-[10px] text-slate-500 mt-1">{srv.type}</div>
                 </div>
-                <p className="text-[11px] font-mono text-slate-400 truncate">{srv.endpoint}</p>
-                <div className="text-[10px] text-slate-500 mt-1">{srv.type}</div>
-              </div>
 
-              <div className="mt-4 pt-3 border-t border-[#141f36] flex items-center justify-between text-xs font-mono">
-                <span className="text-slate-400">
-                  Tools: <span className="text-white font-bold">{srv.toolsCount}</span>
-                </span>
-                <span className="text-slate-400">
-                  Trust: <span className="text-emerald-400 font-bold">{srv.trustScore}%</span>
-                </span>
-                <span className="text-slate-500 text-[10px]">{srv.latency}</span>
+                <div className="mt-4 pt-3 border-t border-[#141f36] flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400">
+                    Tools: <span className="text-white font-bold">{srv.toolsCount}</span>
+                  </span>
+                  <span className="text-slate-400">
+                    Trust: <span className="text-emerald-400 font-bold">{srv.trustScore}%</span>
+                  </span>
+                  <span className="text-slate-500 text-[10px]">{srv.latency}</span>
+                </div>
               </div>
-            </motion.div>
+            </Card3D>
           ))}
         </div>
       </motion.section>

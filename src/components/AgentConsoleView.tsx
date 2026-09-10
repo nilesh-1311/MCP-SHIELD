@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AgentChatMessage, SupportedProvider, ProviderStatus, ToolCallStep } from '@/lib/agent/types';
+import { Card3D } from './Card3D';
 
 export const AgentConsoleView: React.FC = () => {
   const [messages, setMessages] = useState<AgentChatMessage[]>([
@@ -80,6 +81,16 @@ export const AgentConsoleView: React.FC = () => {
     },
   ];
 
+  const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages, isLoading]);
+
   const handleSendMessage = async (textToSend?: string) => {
     const text = textToSend || inputPrompt;
     if (!text.trim() || isLoading) return;
@@ -113,9 +124,43 @@ export const AgentConsoleView: React.FC = () => {
         setMessages((prev) => [...prev, data.message]);
       } else if (data.response) {
         setMessages((prev) => [...prev, data.response]);
+      } else if (data.agentResponse) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_${Date.now()}`,
+            role: 'assistant',
+            content: data.agentResponse.message || data.agentResponse.content || JSON.stringify(data.agentResponse),
+            provider: data.provider || selectedProvider,
+            toolCallStep: data.toolCallStep,
+            shieldExecution: data.shieldExecution,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
+      } else if (data.error) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `msg_err_${Date.now()}`,
+            role: 'assistant',
+            content: `⚠️ Error from Agent Runtime: ${data.error}`,
+            provider: selectedProvider,
+            timestamp: new Date().toISOString(),
+          },
+        ]);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Agent chat error:', err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `msg_err_${Date.now()}`,
+          role: 'assistant',
+          content: `⚠️ Network error communicating with Agent backend: ${err.message || 'Unable to connect'}`,
+          provider: selectedProvider,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -498,6 +543,7 @@ export const AgentConsoleView: React.FC = () => {
                 <span>Evaluating tool call through MCP Shield Security Gateway...</span>
               </motion.div>
             )}
+            <div ref={messagesEndRef} />
           </div>
 
           {/* Input Bar */}

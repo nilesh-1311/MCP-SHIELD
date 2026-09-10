@@ -26,6 +26,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { MCPToolDefinition, ToolCapability } from '@/types';
 import { formatFingerprint } from '@/lib/security/fingerprint';
 import { useToast } from './ToastContext';
+import { Card3D } from './Card3D';
 
 interface ToolRegistryProps {
   tools: MCPToolDefinition[];
