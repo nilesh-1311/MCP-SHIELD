@@ -1,5 +1,4 @@
 import { MCPToolDefinition, AgentPolicy, SecurityCheckItem } from '@/types';
-import { db } from '../db/store';
 
 export interface AuthorizationResult {
   passed: boolean;
@@ -49,14 +48,14 @@ export function checkAuthorization(
   tool: MCPToolDefinition,
   customPolicy?: AgentPolicy
 ): AuthorizationResult {
-  const policy = customPolicy || db.getPolicy(agentId) || DEFAULT_POLICIES[agentId] || {
+  const policy = customPolicy || DEFAULT_POLICIES[agentId] || {
     agentId,
     agentName: agentId,
     role: 'UNRESTRICTED_DEFAULT',
     allowedTools: ['file_reader', 'search_tool', 'report_generator'],
     reviewRequiredTools: ['email_sender'],
     blockedTools: ['destructive_tool', 'bash_executor'],
-    maxRiskThreshold: 60,
+    maxRiskThreshold: 50,
     allowDynamicUpdates: false,
   };
 
@@ -72,27 +71,7 @@ export function checkAuthorization(
     };
   }
 
-  // 2. Inherent Capability Exceeds Agent Threshold (Strict Lockdown)
-  const isHighRiskTool =
-    tool.capability === 'destructive' ||
-    tool.capability === 'exfiltration-capable' ||
-    tool.riskClassification === 'DANGEROUS';
-
-  if (
-    isHighRiskTool &&
-    typeof policy.maxRiskThreshold === 'number' &&
-    policy.maxRiskThreshold <= 30 &&
-    !policy.allowedTools.map((t) => t.toLowerCase()).includes(toolName)
-  ) {
-    return {
-      passed: false,
-      status: 'BLOCKED',
-      scoreImpact: 35,
-      message: `Authorization Failed: Tool '${tool.name}' capability ('${tool.capability}') exceeds agent '${policy.agentName}' strict max risk threshold limit (${policy.maxRiskThreshold}/100 < 70).`,
-    };
-  }
-
-  // 3. Requires Review / Approval
+  // 2. Requires Review / Approval
   if (policy.reviewRequiredTools.map((t) => t.toLowerCase()).includes(toolName)) {
     return {
       passed: true,
@@ -102,7 +81,7 @@ export function checkAuthorization(
     };
   }
 
-  // 4. Allowed
+  // 3. Allowed
   if (policy.allowedTools.map((t) => t.toLowerCase()).includes(toolName) || policy.allowedTools.includes('*')) {
     return {
       passed: true,
@@ -112,7 +91,7 @@ export function checkAuthorization(
     };
   }
 
-  // 5. Default deny for unknown tools
+  // 4. Default deny for unknown tools
   return {
     passed: false,
     status: 'BLOCKED',

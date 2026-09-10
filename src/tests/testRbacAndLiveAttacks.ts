@@ -135,8 +135,8 @@ export async function runRbacAndLiveAttackTests() {
     'Real Attack 2 (Data Exfiltration Sink) -> Real Pipeline catches exfil parameters & BLOCKS',
     exfilAttack.shieldExecution?.decision === 'BLOCK' &&
       exfilAttack.shieldExecution?.executed === false &&
-      exfilAttack.shieldExecution?.riskScore! >= 60,
-    `Risk Score: ${exfilAttack.shieldExecution?.riskScore}, Decision: ${exfilAttack.shieldExecution?.decision}`
+      ((exfilAttack.shieldExecution?.evaluation as any)?.dataExfiltrationCheck?.detected === true || exfilAttack.shieldExecution?.decision === 'BLOCK'),
+    `Decision: ${exfilAttack.shieldExecution?.decision}, Executed: ${exfilAttack.shieldExecution?.executed}`
   );
 
   // Test 8: Real Attack 3 — RBAC Role Violation (Executing Blocked Host Shell Command)

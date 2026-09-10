@@ -26,7 +26,6 @@ import {
   Link as LinkIcon,
   ShieldCheck,
   ShieldAlert,
-  Info,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { SecurityEvent, AuditChainVerificationResult } from '@/types';
@@ -335,11 +334,10 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ events: initialEvent
                 whileTap={{ scale: 0.98 }}
                 onClick={handleSimulateTamper}
                 disabled={isTampering}
-                className="px-3 py-2 bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-700/80 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 cursor-pointer shadow-md shadow-rose-950/40"
-                title="Simulates an insider attacker modifying database records directly"
+                className="px-3 py-2 bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-700/80 rounded-xl text-xs font-mono font-bold flex items-center space-x-1.5 cursor-pointer"
               >
                 <Flame className="w-3.5 h-3.5" />
-                <span>Simulate Direct DB Tampering (Insider Threat)</span>
+                <span>SIMULATE DB TAMPER</span>
               </motion.button>
             ) : (
               <motion.button
@@ -353,14 +351,6 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ events: initialEvent
               </motion.button>
             )}
           </div>
-        </div>
-
-        {/* Distinction Architecture Note */}
-        <div className="mt-3.5 pt-3 border-t border-slate-800/80 flex items-start space-x-2 text-[11px] text-slate-400">
-          <Info className="w-4 h-4 text-sky-400 flex-shrink-0 mt-0.5" />
-          <span>
-            <strong className="text-slate-200">Architecture Note:</strong> Attack scenarios in the <em>AI Agent Console</em> and <em>Attack Lab</em> are executed live through the real detection pipeline (RBAC Matrix → Heuristics → LLM Judge → Honeypots → Real Hash Chaining). The <span className="text-rose-300 font-mono">Simulate Direct DB Tampering</span> button simulates an insider bypassing the agent runtime to alter database tables directly.
-          </span>
         </div>
 
         {/* Forensic Tamper Detail Box */}

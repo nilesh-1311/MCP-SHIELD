@@ -117,40 +117,21 @@ class DataStore {
         .limit(200);
 
       if (!evtsErr && dbEvents && dbEvents.length > 0) {
-        const chronological = [...dbEvents].sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        );
-
-        let runningPrevHash = GENESIS_HASH;
-        const processedEvents: SecurityEvent[] = [];
-
-        for (const row of chronological) {
-          const evt: SecurityEvent = {
-            id: row.id,
-            toolId: row.tool_id,
-            toolName: row.tool_name,
-            agentId: row.agent_id,
-            eventType: row.event_type,
-            riskScore: row.risk_score,
-            decision: row.decision,
-            reason: row.reason,
-            details: row.details,
-            executed: row.executed,
-            prevHash: row.prev_hash || runningPrevHash,
-            entryHash: row.entry_hash || '',
-            timestamp: row.timestamp,
-          };
-
-          if (!evt.entryHash || evt.prevHash !== runningPrevHash) {
-            evt.prevHash = runningPrevHash;
-            evt.entryHash = computeAuditEntryHash(evt, evt.prevHash);
-          }
-
-          runningPrevHash = evt.entryHash;
-          processedEvents.push(evt);
-        }
-
-        this.securityEvents = processedEvents.reverse();
+        this.securityEvents = dbEvents.map((row) => ({
+          id: row.id,
+          toolId: row.tool_id,
+          toolName: row.tool_name,
+          agentId: row.agent_id,
+          eventType: row.event_type,
+          riskScore: row.risk_score,
+          decision: row.decision,
+          reason: row.reason,
+          details: row.details,
+          executed: row.executed,
+          prevHash: row.prev_hash || GENESIS_HASH,
+          entryHash: row.entry_hash || '',
+          timestamp: row.timestamp,
+        }));
       }
 
       // 4. Fetch Threats
@@ -832,5 +813,6 @@ class DataStore {
 // Global Singleton in Node / Next.js runtime
 const globalForStore = globalThis as unknown as { __mcpShieldStore?: DataStore };
 export const db = globalForStore.__mcpShieldStore ?? new DataStore();
-globalForStore.__mcpShieldStore = db;
-
+if (process.env.NODE_ENV !== 'production') {
+  globalForStore.__mcpShieldStore = db;
+}

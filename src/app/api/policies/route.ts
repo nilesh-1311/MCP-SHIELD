@@ -13,13 +13,7 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
-    const agentId = body.agentId || body.policy?.agentId;
-    const agentName = body.agentName || body.policy?.agentName;
-    const role = body.role || body.policy?.role;
-    const allowedTools = body.allowedTools || body.policy?.allowedTools;
-    const reviewRequiredTools = body.reviewRequiredTools || body.policy?.reviewRequiredTools;
-    const blockedTools = body.blockedTools || body.policy?.blockedTools;
-    const maxRiskThreshold = body.maxRiskThreshold ?? body.policy?.maxRiskThreshold;
+    const { agentId, agentName, role, allowedTools, reviewRequiredTools, blockedTools, maxRiskThreshold } = body;
 
     if (!agentId) {
       return NextResponse.json({ error: 'Missing agentId' }, { status: 400 });

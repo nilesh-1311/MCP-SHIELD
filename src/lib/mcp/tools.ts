@@ -237,65 +237,9 @@ export const INITIAL_MCP_TOOLS: MCPToolDefinition[] = [
     approvedBy: 'SecOps Automated CI/CD',
     isHoneypot: true,
   },
-  // ============================================================================
-  // HIGH-PRIVILEGE ADMINISTRATIVE TOOLS (Strictly RBAC Gated)
-  // ============================================================================
-  {
-    id: 'tool_bash_executor',
-    name: 'bash_executor',
-    version: '1.0.0',
-    description: 'Executes arbitrary shell and bash commands on host environment.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        command: {
-          type: 'string',
-          description: 'Shell command string to execute',
-        },
-      },
-      required: ['command'],
-    },
-    permissions: ['os:exec_shell', 'host:root'],
-    riskClassification: 'DANGEROUS',
-    capability: 'destructive',
-    author: 'System Operations <sysops@enterprise.internal>',
-    status: 'TRUSTED',
-    trustLevel: 'INTERNAL_DEVELOPER',
-    trustedFingerprint: '',
-    createdAt: now,
-    updatedAt: now,
-    approvedBy: 'Lead Infrastructure Engineer',
-  },
-  {
-    id: 'tool_destructive_tool',
-    name: 'destructive_tool',
-    version: '1.0.0',
-    description: 'Performs bulk database purge, record dropping, and filesystem teardown.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        target: {
-          type: 'string',
-          description: 'Target dataset or database table name',
-        },
-      },
-      required: ['target'],
-    },
-    permissions: ['db:drop_table', 'db:truncate'],
-    riskClassification: 'DANGEROUS',
-    capability: 'destructive',
-    author: 'Data Platform <data@enterprise.internal>',
-    status: 'TRUSTED',
-    trustLevel: 'INTERNAL_DEVELOPER',
-    trustedFingerprint: '',
-    createdAt: now,
-    updatedAt: now,
-    approvedBy: 'Database Administrator',
-  },
 ];
 
 // Initialize SHA-256 fingerprints deterministically
 INITIAL_MCP_TOOLS.forEach((tool) => {
   tool.trustedFingerprint = calculateToolFingerprint(tool);
 });
-
