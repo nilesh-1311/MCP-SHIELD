@@ -59,6 +59,37 @@ export async function evaluateToolCall(
     { judgeResult, userPrompt }
   );
 
+  // Persist detector scans to database
+  db.recordScan({
+    id: `scn_${Date.now()}_desc`,
+    scanType: 'DESCRIPTION',
+    target: toolName,
+    passed: evaluation.checks.descriptionScan.passed,
+    threatsDetected: evaluation.checks.descriptionScan.details?.threats || [],
+    riskScoreImpact: evaluation.checks.descriptionScan.scoreImpact,
+    createdAt: timestamp,
+  });
+
+  db.recordScan({
+    id: `scn_${Date.now()}_req`,
+    scanType: 'REQUEST_PARAM',
+    target: toolName,
+    passed: evaluation.checks.requestScan.passed,
+    threatsDetected: evaluation.checks.requestScan.details?.threats || [],
+    riskScoreImpact: evaluation.checks.requestScan.scoreImpact,
+    createdAt: timestamp,
+  });
+
+  db.recordScan({
+    id: `scn_${Date.now()}_int`,
+    scanType: 'INTEGRITY',
+    target: toolName,
+    passed: evaluation.checks.integrity.passed,
+    threatsDetected: evaluation.checks.integrity.details?.mismatch ? ['SHA256_MISMATCH'] : [],
+    riskScoreImpact: evaluation.checks.integrity.scoreImpact,
+    createdAt: timestamp,
+  });
+
   // 3. Record Detected Threats for SOC alerting
   if (evaluation.riskScore >= 30 || evaluation.decision === 'BLOCK') {
     if (!evaluation.checks.integrity.passed) {

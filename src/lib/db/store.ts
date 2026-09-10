@@ -1,16 +1,26 @@
-import {
+﻿import {
   MCPToolDefinition,
   ToolVersion,
   SecurityEvent,
   ThreatRecord,
   AgentPolicy,
   ApprovalRequest,
-  ShieldDecision,
-  ThreatType,
 } from '@/types';
 import { INITIAL_MCP_TOOLS } from '../mcp/tools';
 import { DEFAULT_POLICIES } from '../security/authorization';
 import { calculateToolFingerprint } from '../security/fingerprint';
+import { getSupabaseServerClient, isSupabaseServerConfigured } from '../supabase/server';
+import { seedSupabaseDatabase } from '../supabase/seed';
+
+export interface DetectorScanRecord {
+  id: string;
+  scanType: 'DESCRIPTION' | 'REQUEST_PARAM' | 'OUTPUT' | 'INTEGRITY' | 'CROSS_SERVER' | 'EXFILTRATION';
+  target: string;
+  passed: boolean;
+  threatsDetected: any[];
+  riskScoreImpact: number;
+  createdAt: string;
+}
 
 class DataStore {
   private tools: Map<string, MCPToolDefinition> = new Map();
@@ -19,25 +29,178 @@ class DataStore {
   private threats: ThreatRecord[] = [];
   private policies: Map<string, AgentPolicy> = new Map();
   private approvals: Map<string, ApprovalRequest> = new Map();
+  private scans: DetectorScanRecord[] = [];
+  private isInitialized = false;
 
   constructor() {
-    this.seed();
+    this.seedLocal();
+    if (typeof window === 'undefined') {
+      this.initSupabase().catch((err) => {
+        console.warn('[DataStore] Supabase init deferred:', err?.message);
+      });
+    }
   }
 
-  public seed() {
+  /**
+   * Initializes store with Supabase PostgreSQL if configured
+   */
+  public async initSupabase() {
+    if (this.isInitialized) return;
+
+    if (!isSupabaseServerConfigured) {
+      console.log('[DataStore] Operating in local memory mode (Set SUPABASE_URL & SUPABASE_ANON_KEY in .env.local for Postgres mode).');
+      this.isInitialized = true;
+      return;
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (!supabase) return;
+
+    try {
+      // Auto seed if remote database is empty
+      await seedSupabaseDatabase();
+
+      // 1. Fetch Tools
+      const { data: dbTools, error: toolsErr } = await supabase.from('mcp_tools').select('*');
+      if (!toolsErr && dbTools && dbTools.length > 0) {
+        this.tools.clear();
+        for (const row of dbTools) {
+          const tool: MCPToolDefinition = {
+            id: row.id,
+            name: row.name,
+            version: row.version,
+            description: row.description,
+            inputSchema: row.input_schema || {},
+            permissions: row.permissions || [],
+            riskClassification: row.risk_classification,
+            capability: row.capability,
+            author: row.author,
+            status: row.status,
+            trustLevel: row.trust_level,
+            trustedFingerprint: row.trusted_fingerprint,
+            currentFingerprint: row.current_fingerprint || row.trusted_fingerprint,
+            approvedBy: row.approved_by,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          };
+          this.tools.set(tool.name.toLowerCase(), tool);
+        }
+      }
+
+      // 2. Fetch Policies
+      const { data: dbPolicies, error: polErr } = await supabase.from('mcp_agent_policies').select('*');
+      if (!polErr && dbPolicies && dbPolicies.length > 0) {
+        this.policies.clear();
+        for (const row of dbPolicies) {
+          const policy: AgentPolicy = {
+            agentId: row.agent_id,
+            agentName: row.agent_name,
+            role: row.role,
+            allowedTools: row.allowed_tools || [],
+            reviewRequiredTools: row.review_required_tools || [],
+            blockedTools: row.blocked_tools || [],
+            maxRiskThreshold: row.max_risk_threshold,
+            allowDynamicUpdates: row.allow_dynamic_updates,
+          };
+          this.policies.set(policy.agentId, policy);
+        }
+      }
+
+      // 3. Fetch Security Events
+      const { data: dbEvents, error: evtsErr } = await supabase
+        .from('mcp_security_events')
+        .select('*')
+        .order('timestamp', { ascending: false })
+        .limit(200);
+
+      if (!evtsErr && dbEvents && dbEvents.length > 0) {
+        this.securityEvents = dbEvents.map((row) => ({
+          id: row.id,
+          toolId: row.tool_id,
+          toolName: row.tool_name,
+          agentId: row.agent_id,
+          eventType: row.event_type,
+          riskScore: row.risk_score,
+          decision: row.decision,
+          reason: row.reason,
+          details: row.details,
+          executed: row.executed,
+          timestamp: row.timestamp,
+        }));
+      }
+
+      // 4. Fetch Threats
+      const { data: dbThreats, error: thrErr } = await supabase
+        .from('mcp_threats')
+        .select('*')
+        .order('timestamp', { ascending: false });
+
+      if (!thrErr && dbThreats && dbThreats.length > 0) {
+        this.threats = dbThreats.map((row) => ({
+          id: row.id,
+          toolId: row.tool_id,
+          toolName: row.tool_name,
+          agentId: row.agent_id,
+          type: row.type,
+          severity: row.severity,
+          description: row.description,
+          evidence: row.evidence,
+          status: row.status,
+          timestamp: row.timestamp,
+          actionTaken: row.action_taken,
+        }));
+      }
+
+      // 5. Fetch Approvals
+      const { data: dbApprovals, error: appErr } = await supabase
+        .from('mcp_approvals')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!appErr && dbApprovals && dbApprovals.length > 0) {
+        this.approvals.clear();
+        for (const row of dbApprovals) {
+          const app: ApprovalRequest = {
+            id: row.id,
+            toolId: row.tool_id,
+            toolName: row.tool_name,
+            version: row.version,
+            requestedBy: row.requested_by,
+            agentId: row.agent_id,
+            proposedFingerprint: row.proposed_fingerprint,
+            previousFingerprint: row.previous_fingerprint,
+            changesSummary: row.changes_summary,
+            riskScore: row.risk_score,
+            status: row.status,
+            createdAt: row.created_at,
+            decidedAt: row.decided_at,
+            decidedBy: row.decided_by,
+          };
+          this.approvals.set(app.id, app);
+        }
+      }
+
+      this.isInitialized = true;
+      console.log('✅ [DataStore] Successfully synchronized in-memory mirror from Supabase PostgreSQL.');
+    } catch (err: any) {
+      console.warn('[DataStore] Supabase synchronization failed, using local baseline:', err.message);
+    }
+  }
+
+  public seedLocal() {
     this.tools.clear();
     this.toolVersions.clear();
     this.securityEvents = [];
     this.threats = [];
     this.policies.clear();
     this.approvals.clear();
+    this.scans = [];
 
     // 1. Seed Tools
     for (const tool of INITIAL_MCP_TOOLS) {
       const cloned = JSON.parse(JSON.stringify(tool)) as MCPToolDefinition;
       this.tools.set(cloned.name.toLowerCase(), cloned);
 
-      // Seed Version v1.0.0
       const versionRecord: ToolVersion = {
         id: `ver_${cloned.name}_1.0.0`,
         toolId: cloned.id,
@@ -63,15 +226,13 @@ class DataStore {
       this.policies.set(key, JSON.parse(JSON.stringify(policy)));
     }
 
-    // 3. Seed Initial Security Events (to make SOC dashboard & audit logs active and realistic)
+    // 3. Seed Initial Security Events
     const now = new Date();
     const eventTimes = [
       new Date(now.getTime() - 1000 * 60 * 35).toISOString(),
       new Date(now.getTime() - 1000 * 60 * 25).toISOString(),
       new Date(now.getTime() - 1000 * 60 * 18).toISOString(),
       new Date(now.getTime() - 1000 * 60 * 12).toISOString(),
-      new Date(now.getTime() - 1000 * 60 * 8).toISOString(),
-      new Date(now.getTime() - 1000 * 60 * 3).toISOString(),
     ];
 
     this.recordSecurityEvent({
@@ -101,67 +262,50 @@ class DataStore {
       timestamp: eventTimes[1],
       executed: true,
     });
+  }
 
-    this.recordSecurityEvent({
-      id: 'evt_init_3',
-      toolId: 'tool_email_sender',
-      toolName: 'email_sender',
-      agentId: 'ResearchAgent',
-      eventType: 'UNAUTHORIZED_TOOL',
-      riskScore: 70,
-      decision: 'REVIEW',
-      reason: 'Tool capability "exfiltration-capable" enforces policy floor (70). Human approval required.',
-      details: { parameters: { recipient: 'team@enterprise.internal', subject: 'Digest' } },
-      timestamp: eventTimes[2],
-      executed: false,
-    });
-
-    this.recordSecurityEvent({
-      id: 'evt_init_4',
-      toolId: 'tool_file_reader',
-      toolName: 'file_reader',
-      agentId: 'CustomerSupportAgent',
-      eventType: 'PROMPT_INJECTION',
-      riskScore: 85,
-      decision: 'BLOCK',
-      reason: '[BLOCKED BEFORE EXECUTION] Parameter injection detected: path traversal and secret harvesting.',
-      details: { parameters: { filePath: '../../../../etc/shadow' } },
-      timestamp: eventTimes[3],
-      executed: false,
-    });
-
-    this.recordSecurityEvent({
-      id: 'evt_init_5',
-      toolId: 'tool_report_generator',
-      toolName: 'report_generator',
-      agentId: 'AdminAgent',
-      eventType: 'TOOL_EXECUTION',
-      riskScore: 10,
-      decision: 'ALLOW',
-      reason: 'Analytical report generated safely under AdminAgent authorization.',
-      details: { parameters: { title: 'Q3 Infrastructure Audit', format: 'summary' } },
-      timestamp: eventTimes[4],
-      executed: true,
-    });
-
-    this.recordSecurityEvent({
-      id: 'evt_init_6',
-      toolId: 'tool_file_reader',
-      toolName: 'file_reader',
-      agentId: 'ResearchAgent',
-      eventType: 'INTEGRITY_VIOLATION',
-      riskScore: 90,
-      decision: 'BLOCK',
-      reason: '[BLOCKED BEFORE EXECUTION] SHA-256 fingerprint mismatch vs registered baseline. Tool metadata modified.',
-      details: { checks: { integrity: { passed: false, mismatch: true } } },
-      timestamp: eventTimes[5],
-      executed: false,
-    });
+  public seed() {
+    this.seedLocal();
+    if (isSupabaseServerConfigured) {
+      seedSupabaseDatabase().catch(() => {});
+    }
   }
 
   // --- Tools CRUD ---
   public getTools(): MCPToolDefinition[] {
     return Array.from(this.tools.values());
+  }
+
+  public async getToolsAsync(): Promise<MCPToolDefinition[]> {
+    const supabase = getSupabaseServerClient();
+    if (!supabase) return this.getTools();
+
+    try {
+      const { data, error } = await supabase.from('mcp_tools').select('*');
+      if (!error && data) {
+        return data.map((row) => ({
+          id: row.id,
+          name: row.name,
+          version: row.version,
+          description: row.description,
+          inputSchema: row.input_schema || {},
+          permissions: row.permissions || [],
+          riskClassification: row.risk_classification,
+          capability: row.capability,
+          author: row.author,
+          status: row.status,
+          trustLevel: row.trust_level,
+          trustedFingerprint: row.trusted_fingerprint,
+          currentFingerprint: row.current_fingerprint || row.trusted_fingerprint,
+          approvedBy: row.approved_by,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        }));
+      }
+    } catch {
+      // fallback
+    }
+    return this.getTools();
   }
 
   public getToolByName(name: string): MCPToolDefinition | undefined {
@@ -199,6 +343,41 @@ class DataStore {
     existingVersions.push(versionRecord);
     this.toolVersions.set(canonicalTool.id, existingVersions);
 
+    // Asynchronously persist to Supabase
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_tools').upsert({
+        id: canonicalTool.id,
+        name: canonicalTool.name,
+        version: canonicalTool.version,
+        description: canonicalTool.description,
+        input_schema: canonicalTool.inputSchema,
+        permissions: canonicalTool.permissions,
+        risk_classification: canonicalTool.riskClassification,
+        capability: canonicalTool.capability,
+        author: canonicalTool.author,
+        status: canonicalTool.status,
+        trust_level: canonicalTool.trustLevel,
+        trusted_fingerprint: canonicalTool.trustedFingerprint,
+        current_fingerprint: canonicalTool.currentFingerprint || canonicalTool.trustedFingerprint,
+        approved_by: canonicalTool.approvedBy,
+        created_at: canonicalTool.createdAt,
+        updated_at: new Date().toISOString(),
+      }).then(() => {});
+
+      supabase.from('mcp_tool_versions').upsert({
+        id: versionRecord.id,
+        tool_id: canonicalTool.id,
+        version: versionRecord.version,
+        fingerprint: versionRecord.fingerprint,
+        metadata: versionRecord.metadata,
+        approved: versionRecord.approved,
+        approved_by: versionRecord.approvedBy,
+        changelog: versionRecord.changelog,
+        created_at: versionRecord.createdAt,
+      }).then(() => {});
+    }
+
     return canonicalTool;
   }
 
@@ -207,6 +386,11 @@ class DataStore {
     if (tool) {
       tool.status = status;
       tool.updatedAt = new Date().toISOString();
+
+      const supabase = getSupabaseServerClient();
+      if (supabase) {
+        supabase.from('mcp_tools').update({ status, updated_at: tool.updatedAt }).eq('id', tool.id).then(() => {});
+      }
       return true;
     }
     return false;
@@ -248,6 +432,35 @@ class DataStore {
     versions.unshift(versionRecord);
     this.toolVersions.set(tool.id, versions);
 
+    // Asynchronously persist to Supabase
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_tools').update({
+        version: tool.version,
+        description: tool.description,
+        input_schema: tool.inputSchema,
+        permissions: tool.permissions,
+        risk_classification: tool.riskClassification,
+        status: tool.status,
+        approved_by: approvedBy,
+        trusted_fingerprint: tool.trustedFingerprint,
+        current_fingerprint: tool.trustedFingerprint,
+        updated_at: tool.updatedAt,
+      }).eq('id', tool.id).then(() => {});
+
+      supabase.from('mcp_tool_versions').insert({
+        id: versionRecord.id,
+        tool_id: tool.id,
+        version: versionRecord.version,
+        fingerprint: versionRecord.fingerprint,
+        metadata: versionRecord.metadata,
+        approved: true,
+        approved_by: approvedBy,
+        changelog: versionRecord.changelog,
+        created_at: versionRecord.createdAt,
+      }).then(() => {});
+    }
+
     return tool;
   }
 
@@ -261,6 +474,25 @@ class DataStore {
     if (this.securityEvents.length > 500) {
       this.securityEvents = this.securityEvents.slice(0, 500);
     }
+
+    // Persist to Supabase
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_security_events').insert({
+        id: event.id,
+        tool_id: event.toolId,
+        tool_name: event.toolName,
+        agent_id: event.agentId,
+        event_type: event.eventType,
+        risk_score: event.riskScore,
+        decision: event.decision,
+        reason: event.reason,
+        details: event.details || {},
+        executed: event.executed,
+        timestamp: event.timestamp || new Date().toISOString(),
+      }).then(() => {});
+    }
+
     return event;
   }
 
@@ -271,6 +503,25 @@ class DataStore {
   // --- Threats ---
   public recordThreat(threat: ThreatRecord): ThreatRecord {
     this.threats.unshift(threat);
+
+    // Persist to Supabase
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_threats').insert({
+        id: threat.id,
+        tool_id: threat.toolId,
+        tool_name: threat.toolName,
+        agent_id: threat.agentId,
+        type: threat.type,
+        severity: threat.severity,
+        description: threat.description,
+        evidence: threat.evidence,
+        status: threat.status,
+        action_taken: threat.actionTaken,
+        timestamp: threat.timestamp || new Date().toISOString(),
+      }).then(() => {});
+    }
+
     return threat;
   }
 
@@ -318,12 +569,48 @@ class DataStore {
     };
 
     this.policies.set(existingKey, updated);
+
+    // Persist to Supabase
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_agent_policies').upsert({
+        agent_id: updated.agentId,
+        agent_name: updated.agentName,
+        role: updated.role,
+        allowed_tools: updated.allowedTools,
+        review_required_tools: updated.reviewRequiredTools,
+        blocked_tools: updated.blockedTools,
+        max_risk_threshold: updated.maxRiskThreshold,
+        allow_dynamic_updates: updated.allowDynamicUpdates,
+        updated_at: new Date().toISOString(),
+      }).then(() => {});
+    }
+
     return updated;
   }
 
   // --- Approvals ---
   public createApprovalRequest(req: ApprovalRequest): ApprovalRequest {
     this.approvals.set(req.id, req);
+
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_approvals').insert({
+        id: req.id,
+        tool_id: req.toolId,
+        tool_name: req.toolName,
+        version: req.version,
+        requested_by: req.requestedBy,
+        agent_id: req.agentId,
+        proposed_fingerprint: req.proposedFingerprint,
+        previous_fingerprint: req.previousFingerprint,
+        changes_summary: req.changesSummary,
+        risk_score: req.riskScore,
+        status: req.status,
+        created_at: req.createdAt || new Date().toISOString(),
+      }).then(() => {});
+    }
+
     return req;
   }
 
@@ -341,7 +628,44 @@ class DataStore {
     req.status = status;
     req.decidedAt = new Date().toISOString();
     req.decidedBy = decidedBy;
+
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_approvals').update({
+        status,
+        decided_at: req.decidedAt,
+        decided_by: decidedBy,
+      }).eq('id', id).then(() => {});
+    }
+
     return req;
+  }
+
+  // --- Scans Logging ---
+  public recordScan(scan: DetectorScanRecord): DetectorScanRecord {
+    this.scans.unshift(scan);
+    if (this.scans.length > 500) {
+      this.scans = this.scans.slice(0, 500);
+    }
+
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      supabase.from('mcp_scans').insert({
+        id: scan.id,
+        scan_type: scan.scanType,
+        target: scan.target,
+        passed: scan.passed,
+        threats_detected: scan.threatsDetected,
+        risk_score_impact: scan.riskScoreImpact,
+        created_at: scan.createdAt,
+      }).then(() => {});
+    }
+
+    return scan;
+  }
+
+  public getScans(limit = 100): DetectorScanRecord[] {
+    return this.scans.slice(0, limit);
   }
 }
 
@@ -351,4 +675,3 @@ export const db = globalForStore.__mcpShieldStore ?? new DataStore();
 if (process.env.NODE_ENV !== 'production') {
   globalForStore.__mcpShieldStore = db;
 }
-
