@@ -145,6 +145,7 @@ async function runAllTests() {
     console.log('🎉 ALL ADVANCED SECURITY & EXECUTION PROOF ACCEPTANCE TESTS PASSED!\n');
     await run3LayerGateTests();
     await runHoneypotAndChainTests();
+    await runRbacAndLiveAttackTests();
   } else {
     console.error('❌ SOME TESTS FAILED.');
     process.exit(1);
@@ -153,6 +154,7 @@ async function runAllTests() {
 
 import { run3LayerGateTests } from './test3LayerGate';
 import { runHoneypotAndChainTests } from './testHoneypotAndChain';
+import { runRbacAndLiveAttackTests } from './testRbacAndLiveAttacks';
 
 runAllTests().catch((err) => {
   console.error('Test Runner encountered unhandled error:', err);

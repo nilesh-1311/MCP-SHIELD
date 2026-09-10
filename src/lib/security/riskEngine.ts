@@ -92,14 +92,15 @@ export function calculateRisk(factors: RiskInputFactors): RiskEvaluation {
   // Determine Policy Decision
   let decision: ShieldDecision = 'ALLOW';
 
-  // Hard blocking conditions: Unregistered, Credential Theft, Exfiltration, Unauthorized, or High Risk
+  // Hard blocking conditions: Unregistered, Credential Theft, Exfiltration, Unauthorized, or High Risk Exceeding Threshold
   if (
     factors.unregisteredTool ||
     factors.credentialStealingDetected ||
     factors.exfiltrationDetected ||
     factors.unauthorizedTool ||
     (factors.fingerprintMismatch && factors.suspiciousInstructionDetected) ||
-    finalScore >= (factors.agentMaxThreshold || 60)
+    (typeof factors.agentMaxThreshold === 'number' && finalScore > factors.agentMaxThreshold) ||
+    finalScore >= 80
   ) {
     decision = 'BLOCK';
   } else if (factors.requiresReview || factors.fingerprintMismatch || finalScore >= 30) {
@@ -158,7 +159,7 @@ export function combine3LayerRiskGate(input: ThreeLayerGateInput): ThreeLayerGat
     heuristicReasons,
     heuristicDecision,
     hasMaliciousThreats,
-    agentMaxThreshold = 70,
+    agentMaxThreshold,
   } = input;
 
   // STRICTLY NON-ADDITIVE MAX COMBINATION
@@ -188,16 +189,26 @@ export function combine3LayerRiskGate(input: ThreeLayerGateInput): ThreeLayerGat
     combinedReasons.push(`[Layer 3: Heuristics] ${heuristicReasons.join('; ')} (Heuristic Score: ${heuristicScore})`);
   }
 
+  // Check if assessed risk exceeds agent's configured max threshold
+  const thresholdLimit = typeof agentMaxThreshold === 'number' ? agentMaxThreshold : 70;
+  const threatScore = Math.max(judgeScore, heuristicScore);
+  const threatExceedsThreshold = typeof agentMaxThreshold === 'number' && threatScore > thresholdLimit;
+  const floorExceedsRestrictedThreshold = typeof agentMaxThreshold === 'number' && thresholdLimit <= 50 && finalRiskScore > thresholdLimit;
+
+  if (threatExceedsThreshold || floorExceedsRestrictedThreshold) {
+    combinedReasons.push(
+      `[RBAC Threshold Exceeded] Evaluated risk score (${finalRiskScore}/100) strictly exceeds agent maximum allowed threshold (${thresholdLimit}/100).`
+    );
+  }
+
   if (combinedReasons.length === 0) {
     combinedReasons.push('All 3 security layers verified clean (0)');
   }
 
   // Decision Logic:
-  // If finalRiskScore >= 70:
-  // - If policyFloor >= 70 and no malicious attacks/violations detected -> REVIEW (approval required)
-  // - If malicious attacks, integrity violations, prompt injections, or high judge attack score -> BLOCK
-  // Else if finalRiskScore >= 40 -> REVIEW
-  // Else -> ALLOW
+  // - If malicious attacks, integrity violations, prompt injections, or risk exceeding threshold -> BLOCK
+  // - If policy floor >= 70 or review required -> REVIEW (human authorization gate)
+  // - Otherwise -> ALLOW
   let decision: ShieldDecision = 'ALLOW';
 
   const isMaliciousAttack =
@@ -209,15 +220,9 @@ export function combine3LayerRiskGate(input: ThreeLayerGateInput): ThreeLayerGat
     judgeScore >= 75 ||
     heuristicScore >= 75;
 
-  if (finalRiskScore >= 70) {
-    if (isMaliciousAttack) {
-      decision = 'BLOCK';
-    } else if (policyFloor >= 70 || finalRiskScore >= 40) {
-      decision = 'REVIEW';
-    } else {
-      decision = 'BLOCK';
-    }
-  } else if (finalRiskScore >= 40 || heuristicDecision === 'REVIEW') {
+  if (threatExceedsThreshold || floorExceedsRestrictedThreshold || isMaliciousAttack) {
+    decision = 'BLOCK';
+  } else if (policyFloor >= 70 || heuristicDecision === 'REVIEW' || finalRiskScore >= 40) {
     decision = 'REVIEW';
   } else {
     decision = 'ALLOW';

@@ -88,6 +88,57 @@ export const MCP_TOOLS_OPENAI_FORMAT = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'credential_vault_reader',
+      description: 'High-security internal credential and secret reader utility for system maintenance.',
+      parameters: {
+        type: 'object',
+        properties: {
+          target_service: {
+            type: 'string',
+            description: 'Target service to inspect credentials for (e.g. aws_production_keys, db_passwords)',
+          },
+        },
+        required: ['target_service'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'bash_executor',
+      description: 'Low-level direct bash and shell execution utility for host OS command execution.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: {
+            type: 'string',
+            description: 'Shell command string to execute',
+          },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'destructive_tool',
+      description: 'Administrative database cleanup and table purging tool.',
+      parameters: {
+        type: 'object',
+        properties: {
+          target: {
+            type: 'string',
+            description: 'Target dataset or database table name',
+          },
+        },
+        required: ['target'],
+      },
+    },
+  },
 ];
 
 export const MCP_TOOLS_GEMINI_FORMAT = [
@@ -104,11 +155,14 @@ export function getSystemPromptForRole(agentRole: string): string {
   return `You are ${agentRole}, an enterprise AI agent connected to an MCP (Model Context Protocol) tool runtime.
 All tool calls you make are intercepted, evaluated, and authorized in real-time by MCP Shield.
 
-Available tools:
+Available tools in MCP ecosystem:
 - file_reader: read files from approved directory.
 - search_tool: search local knowledge base.
 - report_generator: generate business & security reports.
 - email_sender: dispatch email notifications.
+- credential_vault_reader: internal secret inspection tool.
+- bash_executor: host shell command execution.
+- destructive_tool: administrative database purge.
 
-Always use appropriate tool calls when answering queries that request reading files, searching documents, creating reports, or sending emails.`;
+Always invoke the appropriate MCP tool call when answering queries.`;
 }
