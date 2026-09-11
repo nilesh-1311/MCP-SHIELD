@@ -1,5 +1,6 @@
 {
   "name": "mcp-shield",
+  "type":"module",
   "version": "1.0.0",
   "description": "MCP Shield — Runtime Integrity & Threat Protection for AI Agents",
   "scripts": {
@@ -21,13 +22,13 @@
     "tailwind-merge": "^2.5.4"
   },
   "devDependencies": {
-    "@types/node": "^20.17.0",
+    "@types/node": "20.19.43",
     "@types/react": "18.3.11",
     "@types/react-dom": "18.3.1",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.47",
     "tailwindcss": "3.4.14",
     "tsx": "^4.19.1",
-    "typescript": "^5.6.3"
+    "typescript": "5.9.3"
   }
 }

@@ -1,5 +1,6 @@
 # Dependencies
-/node_modules
+node_modules
+**/node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -11,6 +12,7 @@
 # Production build artifacts
 /build
 /dist
+**/dist
 
 # Debug / logs
 npm-debug.log*

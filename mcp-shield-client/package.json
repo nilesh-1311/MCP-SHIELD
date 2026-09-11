@@ -1,0 +1,22 @@
+{
+  "name": "mcp-shield-client",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Web-based MCP Client Agent demonstrating real-time tool call security enforcement",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "server": "node server/index.js",
+    "client": "npm run dev --prefix client",
+    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"cyan,magenta\" \"npm run server\" \"npm run client\"",
+    "postinstall": "cd client && npm install"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

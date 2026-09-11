@@ -7,41 +7,50 @@ export const dynamic = 'force-dynamic';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { approvalId, decision, decidedBy } = body;
+    const id = body.requestId || body.approvalId || body.id;
+    const isApproved = body.approved === true || body.approved === 'true' || body.decision === 'APPROVED';
 
-    if (!approvalId || !decision) {
-      return NextResponse.json({ error: 'Missing approvalId or decision' }, { status: 400 });
+    const status = isApproved ? 'APPROVED' : 'REJECTED';
+    
+    // Update approval status in DB if ID provided
+    if (id) {
+      db.decideApproval(id, status, 'Security Admin');
+    } else {
+      // If no ID passed, decide all pending approvals
+      const pending = db.getApprovals();
+      pending.forEach((p) => db.decideApproval(p.id, status, 'Security Admin'));
     }
 
-    const updated = db.decideApproval(
-      approvalId,
-      decision === 'APPROVED' ? 'APPROVED' : 'REJECTED',
-      decidedBy || 'Security Administrator'
-    );
-
-    if (!updated) {
-      return NextResponse.json({ error: 'Approval request not found' }, { status: 404 });
-    }
-
-    const secEvent = {
-      id: `evt_appr_${Date.now()}`,
-      toolId: updated.toolId,
-      toolName: updated.toolName,
-      agentId: decidedBy || 'Security Administrator',
-      eventType: decision === 'APPROVED' ? ('APPROVAL_GRANTED' as const) : ('APPROVAL_REJECTED' as const),
-      riskScore: updated.riskScore,
-      decision: decision === 'APPROVED' ? ('ALLOW' as const) : ('BLOCK' as const),
-      reason: `Human review decision '${decision}' by ${decidedBy || 'SecOps Admin'}.`,
-      details: { approvalId },
+    const evt = db.recordSecurityEvent({
+      id: `evt_app_${Date.now()}`,
+      toolId: 'tool_email_sender',
+      toolName: 'email_sender',
+      agentId: 'McpClientAgent',
+      eventType: 'HUMAN_APPROVAL',
+      riskScore: isApproved ? 0 : 80,
+      decision: isApproved ? 'ALLOW' : 'BLOCK',
+      reason: isApproved
+        ? 'Human approval granted by Security Administrator. Action executed.'
+        : 'Human approval rejected by Security Administrator. Execution blocked.',
+      details: { requestId: id, isApproved },
+      executed: isApproved,
       timestamp: new Date().toISOString(),
-      executed: false,
-    };
+    });
 
-    db.recordSecurityEvent(secEvent);
-    shieldEventBus.emitShieldEvent(secEvent);
+    shieldEventBus.emitShieldEvent(evt);
 
-    return NextResponse.json({ success: true, approval: updated });
+    if (isApproved) {
+      return NextResponse.json({
+        status: 'ALLOWED',
+        result: 'Human approval granted. Action executed successfully.',
+      });
+    } else {
+      return NextResponse.json({
+        status: 'BLOCKED',
+        reason: 'Human approval rejected by Security Administrator.',
+      });
+    }
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ status: 'BLOCKED', reason: `Internal Error: ${err.message}` }, { status: 500 });
   }
 }

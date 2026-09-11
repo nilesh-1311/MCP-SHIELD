@@ -65,6 +65,12 @@ function MainAppContent() {
   const { latestEvent } = useShieldEvents();
 
   useEffect(() => {
+    fetchDashboardData();
+    const interval = setInterval(fetchDashboardData, 3000);
+    return () => clearInterval(interval);
+  }, [fetchDashboardData]);
+
+  useEffect(() => {
     if (latestEvent) {
       fetchDashboardData();
     }
@@ -94,11 +100,7 @@ function MainAppContent() {
     }
   };
 
-  useEffect(() => {
-    fetchDashboardData();
-    const interval = setInterval(fetchDashboardData, 6000);
-    return () => clearInterval(interval);
-  }, [fetchDashboardData]);
+
 
   // Global Ctrl+K / Cmd+K listener
   useEffect(() => {
